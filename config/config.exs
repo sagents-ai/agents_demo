@@ -52,6 +52,15 @@ config :tailwind,
     cd: Path.expand("..", __DIR__)
   ]
 
+config :langchain, :openai_key, fn -> System.fetch_env!("OPENAI_KEY") end
+config :langchain, :anthropic_key, fn -> System.fetch_env!("ANTHROPIC_API_KEY") end
+
+# LangChain Bedrock authentication config
+config :langchain,
+  aws_access_key_id: System.get_env("AWS_ACCESS_KEY_ID", "dev_access_key_id"),
+  aws_secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY", "dev_secret_access_key"),
+  aws_region: System.get_env("AWS_REGION", "us-west-1")
+
 # Configures Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",

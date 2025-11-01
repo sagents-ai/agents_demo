@@ -35,3 +35,9 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
+
+# Configure LangChain for testing with dummy AWS credentials
+config :langchain,
+  aws_access_key_id: System.get_env("AWS_ACCESS_KEY_ID", "test_key_id"),
+  aws_secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY", "test_secret_key"),
+  aws_region: System.get_env("AWS_REGION", "us-west-1")

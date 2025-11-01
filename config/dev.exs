@@ -29,6 +29,11 @@ config :agents_demo, AgentsDemoWeb.Endpoint,
     tailwind: {Tailwind, :install_and_run, [:agents_demo, ~w(--watch)]}
   ]
 
+# Tidewave support
+config :phoenix_live_view,
+  debug_heex_annotations: true,
+  debug_attributes: true
+
 # ## SSL Support
 #
 # In order to use HTTPS in development, a self-signed
