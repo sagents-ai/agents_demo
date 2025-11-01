@@ -17,7 +17,8 @@ defmodule AgentsDemoWeb.Router do
   scope "/", AgentsDemoWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", ChatLive
+    live "/chat", ChatLive
   end
 
   # Other scopes may use custom stacks.
