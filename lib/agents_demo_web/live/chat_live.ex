@@ -268,13 +268,13 @@ defmodule AgentsDemoWeb.ChatLive do
 
       <%= if not @collapsed do %>
         <div class="flex-1 overflow-y-auto flex flex-col">
-          <div class="flex border-b border-[var(--color-border)] bg-[var(--color-background)]">
+          <div class="flex bg-[var(--color-background)]">
             <button
               class={[
-                "flex-1 py-3 px-4 bg-transparent border-none text-[var(--color-text-secondary)] font-medium text-sm transition-all border-b-2 relative cursor-pointer",
+                "flex-1 py-3 px-4 bg-transparent text-[var(--color-text-secondary)] font-medium text-sm transition-all border-b-2 relative cursor-pointer border-t-0 border-l-0 border-r-0",
                 @active_tab == "tasks" &&
-                  "text-[var(--color-primary)] border-[var(--color-primary)] font-semibold",
-                @active_tab != "tasks" && "border-transparent hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-light)]"
+                  "text-[var(--color-primary)] border-[var(--color-primary)] font-semibold bg-[var(--color-surface)]",
+                @active_tab != "tasks" && "border-[var(--color-border)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-light)]"
               ]}
               phx-click="switch_tab"
               phx-value-tab="tasks"
@@ -284,10 +284,10 @@ defmodule AgentsDemoWeb.ChatLive do
             </button>
             <button
               class={[
-                "flex-1 py-3 px-4 bg-transparent border-none text-[var(--color-text-secondary)] font-medium text-sm transition-all border-b-2 relative cursor-pointer",
+                "flex-1 py-3 px-4 bg-transparent text-[var(--color-text-secondary)] font-medium text-sm transition-all border-b-2 relative cursor-pointer border-t-0 border-l-0 border-r-0",
                 @active_tab == "files" &&
-                  "text-[var(--color-primary)] border-[var(--color-primary)] font-semibold",
-                @active_tab != "files" && "border-transparent hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-light)]"
+                  "text-[var(--color-primary)] border-[var(--color-primary)] font-semibold bg-[var(--color-surface)]",
+                @active_tab != "files" && "border-[var(--color-border)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-light)]"
               ]}
               phx-click="switch_tab"
               phx-value-tab="files"
