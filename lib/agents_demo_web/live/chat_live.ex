@@ -22,6 +22,8 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:sidebar_active_tab, "tasks")
      |> assign(:selected_sub_agent, nil)
      |> assign(:selected_file, nil)
+     |> assign(:selected_file_path, nil)
+     |> assign(:selected_file_content, nil)
      |> assign(:is_thread_history_open, false)
      |> assign(:has_messages, false)}
   end
@@ -102,6 +104,31 @@ defmodule AgentsDemoWeb.ChatLive do
   @impl true
   def handle_event("switch_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, :sidebar_active_tab, tab)}
+  end
+
+  @impl true
+  def handle_event("view_file", %{"path" => path}, socket) do
+    case FileSystemServer.read_file(@agent_id, path) do
+      {:ok, content} ->
+        {:noreply,
+         socket
+         |> assign(:selected_file_path, path)
+         |> assign(:selected_file_content, content)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:selected_file_path, path)
+         |> assign(:selected_file_content, "Error: Could not read file")}
+    end
+  end
+
+  @impl true
+  def handle_event("close_file_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_file_path, nil)
+     |> assign(:selected_file_content, nil)}
   end
 
   @impl true
@@ -193,6 +220,13 @@ defmodule AgentsDemoWeb.ChatLive do
           is_thread_history_open={@is_thread_history_open}
         />
       </div>
+
+      <%= if @selected_file_path do %>
+        <.file_viewer_modal
+          path={@selected_file_path}
+          content={@selected_file_content}
+        />
+      <% end %>
     </div>
     """
   end
@@ -303,7 +337,11 @@ defmodule AgentsDemoWeb.ChatLive do
                       </div>
                       <div class="flex flex-col gap-1">
                         <%= for {path, _metadata} <- dir_files do %>
-                          <div class="flex items-center gap-2 pl-6 pr-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md cursor-pointer hover:bg-[var(--color-border-light)] transition-colors">
+                          <div
+                            class="flex items-center gap-2 pl-6 pr-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md cursor-pointer hover:bg-[var(--color-border-light)] transition-colors"
+                            phx-click="view_file"
+                            phx-value-path={path}
+                          >
                             <.icon
                               name="hero-document-text"
                               class="w-4 h-4 text-[var(--color-text-secondary)] flex-shrink-0"
@@ -448,6 +486,58 @@ defmodule AgentsDemoWeb.ChatLive do
           @message.type == :ai && "bg-[var(--color-surface)]"
         ]}>
           {@message.content}
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Component: File Viewer Modal
+  defp file_viewer_modal(assigns) do
+    ~H"""
+    <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div
+        class="bg-[var(--color-surface)] rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col"
+        phx-click-away="close_file_modal"
+      >
+        <%!-- Modal Header --%>
+        <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
+          <div class="flex items-center gap-3">
+            <.icon name="hero-document-text" class="w-6 h-6 text-[var(--color-primary)]" />
+            <h2 class="text-lg font-semibold text-[var(--color-text-primary)] m-0">
+              {Path.basename(@path)}
+            </h2>
+          </div>
+          <button
+            phx-click="close_file_modal"
+            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors"
+            type="button"
+            title="Close"
+          >
+            <.icon name="hero-x-mark" class="w-5 h-5" />
+          </button>
+        </div>
+        <%!-- File Path --%>
+        <div class="px-6 py-2 bg-[var(--color-background)] border-b border-[var(--color-border)]">
+          <span class="text-xs text-[var(--color-text-secondary)] font-mono">{@path}</span>
+        </div>
+        <%!-- File Content --%>
+        <div class="flex-1 overflow-hidden p-6">
+          <textarea
+            readonly
+            class="w-full h-full px-4 py-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-background)] text-[var(--color-text-primary)] text-sm font-mono resize-none focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+            style="min-height: 400px;"
+          >{@content}</textarea>
+        </div>
+        <%!-- Modal Footer --%>
+        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
+          <button
+            phx-click="close_file_modal"
+            class="px-4 py-2 bg-[var(--color-primary)] text-white border-none rounded-lg hover:opacity-90 transition-opacity"
+            type="button"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>
