@@ -1,8 +1,15 @@
 defmodule AgentsDemoWeb.ChatLive do
   use AgentsDemoWeb, :live_view
 
+  alias LangChain.Agents.FileSystemServer
+
+  @agent_id "demo-agent-001"
+
   @impl true
   def mount(_params, _session, socket) do
+    # Load files from the FileSystemServer
+    files = load_filesystem_files()
+
     {:ok,
      socket
      |> stream(:messages, [])
@@ -10,7 +17,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:loading, false)
      |> assign(:thread_id, nil)
      |> assign(:todos, [])
-     |> assign(:files, %{})
+     |> assign(:files, files)
      |> assign(:sidebar_collapsed, false)
      |> assign(:sidebar_active_tab, "tasks")
      |> assign(:selected_sub_agent, nil)
@@ -125,6 +132,42 @@ defmodule AgentsDemoWeb.ChatLive do
 
   defp generate_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  defp load_filesystem_files do
+    try do
+      # Get all file paths from the FileSystemServer
+      file_paths = FileSystemServer.list_files(@agent_id)
+
+      # Convert to a map of path => %{type: :file, directory: virtual_dir}
+      files =
+        file_paths
+        |> Enum.map(fn path ->
+          # Extract directory information
+          directory =
+            path
+            |> Path.dirname()
+            |> case do
+              "/" -> "Root"
+              dir -> dir
+            end
+
+          {path, %{type: :file, directory: directory}}
+        end)
+        |> Enum.into(%{})
+
+      files
+    rescue
+      _ ->
+        # If FileSystemServer isn't available yet, return empty map
+        %{}
+    end
+  end
+
+  defp group_files_by_directory(files) do
+    files
+    |> Enum.group_by(fn {_path, metadata} -> metadata.directory end)
+    |> Enum.sort_by(fn {directory, _files} -> directory end)
   end
 
   @impl true
@@ -248,11 +291,27 @@ defmodule AgentsDemoWeb.ChatLive do
                   <p class="text-[var(--color-text-secondary)] text-sm m-0">No files yet</p>
                 </div>
               <% else %>
-                <div class="flex flex-col gap-2">
-                  <%= for {path, _content} <- @files do %>
-                    <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md cursor-pointer hover:bg-[var(--color-border-light)] transition-colors">
-                      <.icon name="hero-document-text" class="w-4 h-4 text-[var(--color-text-secondary)] flex-shrink-0" />
-                      <span class="text-sm">{path}</span>
+                <div class="flex flex-col gap-3">
+                  <%!-- Group files by directory --%>
+                  <%= for {directory, dir_files} <- group_files_by_directory(@files) do %>
+                    <div class="flex flex-col gap-1">
+                      <div class="flex items-center gap-2 px-2 py-1">
+                        <.icon name="hero-folder" class="w-4 h-4 text-[var(--color-primary)] flex-shrink-0" />
+                        <span class="text-xs font-semibold text-[var(--color-text-secondary)] tracking-wide">
+                          {directory}
+                        </span>
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <%= for {path, _metadata} <- dir_files do %>
+                          <div class="flex items-center gap-2 pl-6 pr-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md cursor-pointer hover:bg-[var(--color-border-light)] transition-colors">
+                            <.icon
+                              name="hero-document-text"
+                              class="w-4 h-4 text-[var(--color-text-secondary)] flex-shrink-0"
+                            />
+                            <span class="text-sm truncate" title={path}>{Path.basename(path)}</span>
+                          </div>
+                        <% end %>
+                      </div>
                     </div>
                   <% end %>
                 </div>
