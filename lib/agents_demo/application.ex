@@ -95,7 +95,9 @@ defmodule AgentsDemo.Application do
       agent: agent,
       persistence_configs: [fs_config],
       pubsub: Phoenix.PubSub,
-      pubsub_name: AgentsDemo.PubSub
+      pubsub_name: AgentsDemo.PubSub,
+      # The demo only works with 1 agent. Keep it running with the application.
+      inactivity_timeout: :infinity
     ]
   end
 end

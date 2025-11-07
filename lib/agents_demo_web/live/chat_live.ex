@@ -1,14 +1,28 @@
 defmodule AgentsDemoWeb.ChatLive do
   use AgentsDemoWeb, :live_view
 
+  require Logger
+
+  alias LangChain.Agents.AgentServer
   alias LangChain.Agents.FileSystemServer
+  alias LangChain.Message
 
   @agent_id "demo-agent-001"
 
+  # TODO: Issues:
+  #
+
   @impl true
   def mount(_params, _session, socket) do
-    # Load files from the FileSystemServer
-    files = load_filesystem_files()
+    if connected?(socket) do
+      case AgentServer.subscribe(@agent_id) do
+        :ok ->
+          Logger.info("Subscribed to AgentServer for agent #{@agent_id}")
+
+        {:error, reason} ->
+          Logger.error("Failed to subscribe to AgentServer: #{inspect(reason)}")
+      end
+    end
 
     {:ok,
      socket
@@ -17,7 +31,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:loading, false)
      |> assign(:thread_id, nil)
      |> assign(:todos, [])
-     |> assign(:files, files)
+     |> assign_filesystem_files()
      |> assign(:sidebar_collapsed, false)
      |> assign(:sidebar_active_tab, "tasks")
      |> assign(:selected_sub_agent, nil)
@@ -50,7 +64,7 @@ defmodule AgentsDemoWeb.ChatLive do
     if message_text == "" or socket.assigns.loading do
       {:noreply, socket}
     else
-      # Add user message immediately
+      # Add user message immediately to UI
       user_message = %{
         id: generate_id(),
         type: :human,
@@ -58,18 +72,27 @@ defmodule AgentsDemoWeb.ChatLive do
         timestamp: DateTime.utc_now()
       }
 
-      socket =
-        socket
-        |> assign(:input, "")
-        |> assign(:loading, true)
-        |> assign(:has_messages, true)
-        |> stream_insert(:messages, user_message)
+      # Create LangChain Message
+      langchain_message = Message.new_user!(message_text)
 
-      # TODO: Send to agent and handle response
-      # For now, just simulate a response
-      send(self(), {:agent_response, message_text})
+      # Add message to AgentServer and execute
+      case AgentServer.add_message(@agent_id, langchain_message) do
+        :ok ->
+          Logger.info("Agent execution started")
 
-      {:noreply, socket}
+          {:noreply,
+           socket
+           |> assign(:input, "")
+           |> assign(:loading, true)}
+
+        {:error, reason} ->
+          Logger.error("Failed to execute agent: #{inspect(reason)}")
+
+          {:noreply,
+           socket
+           |> assign(:loading, false)
+           |> put_flash(:error, "Failed to start agent: #{inspect(reason)}")}
+      end
     end
   end
 
@@ -85,6 +108,9 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("new_thread", _params, socket) do
+    # Note: This only clears the UI. The AgentServer still has its conversation history.
+    # For a true "new thread", we'd need to reset the AgentServer's state, which would
+    # require adding a reset API or restarting the AgentServer.
     {:noreply,
      socket
      |> assign(:thread_id, nil)
@@ -132,19 +158,98 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent_response, _user_message}, socket) do
-    # Simulate agent response
-    ai_message = %{
+  def handle_info({:status_changed, :running, nil}, socket) do
+    Logger.info("Agent is running")
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:status_changed, :completed, final_state}, socket) do
+    Logger.info("Agent completed execution")
+
+    # Extract the last assistant message from the state
+    assistant_messages =
+      final_state.messages
+      |> Enum.reverse()
+      |> Enum.find(fn msg -> msg.role == :assistant end)
+
+    case assistant_messages do
+      %Message{content: content} when is_binary(content) ->
+        ai_message = %{
+          id: generate_id(),
+          type: :ai,
+          content: content,
+          timestamp: DateTime.utc_now()
+        }
+
+        # Update todos if they changed
+        socket =
+          if final_state.todos != socket.assigns.todos do
+            assign(socket, :todos, final_state.todos)
+          else
+            socket
+          end
+
+        {:noreply,
+         socket
+         |> assign(:loading, false)
+         |> assign_filesystem_files()
+         |> stream_insert(:messages, ai_message)}
+
+      _ ->
+        Logger.warning("No assistant message found in completed state")
+
+        {:noreply, assign(socket, :loading, false)}
+    end
+  end
+
+  @impl true
+  def handle_info({:status_changed, :error, reason}, socket) do
+    Logger.error("Agent execution failed: #{inspect(reason)}")
+
+    error_message = %{
       id: generate_id(),
       type: :ai,
-      content: "This is a simulated response. Agent integration coming soon!",
+      content: "Sorry, I encountered an error: #{inspect(reason)}",
       timestamp: DateTime.utc_now()
     }
 
     {:noreply,
      socket
      |> assign(:loading, false)
-     |> stream_insert(:messages, ai_message)}
+     |> stream_insert(:messages, error_message)}
+  end
+
+  @impl true
+  def handle_info({:todo_created, todo}, socket) do
+    Logger.info("Todo created: #{todo.content}")
+    todos = socket.assigns.todos ++ [todo]
+    {:noreply, assign(socket, :todos, todos)}
+  end
+
+  @impl true
+  def handle_info({:todo_updated, todo}, socket) do
+    Logger.info("Todo updated: #{todo.content}")
+
+    todos =
+      Enum.map(socket.assigns.todos, fn t ->
+        if t.id == todo.id, do: todo, else: t
+      end)
+
+    {:noreply, assign(socket, :todos, todos)}
+  end
+
+  @impl true
+  def handle_info({:todo_deleted, todo_id}, socket) do
+    Logger.info("Todo deleted: #{todo_id}")
+    todos = Enum.reject(socket.assigns.todos, fn t -> t.id == todo_id end)
+    {:noreply, assign(socket, :todos, todos)}
+  end
+
+  @impl true
+  def handle_info(_msg, socket) do
+    # Ignore unknown messages
+    {:noreply, socket}
   end
 
   defp load_thread(socket, _thread_id) do
@@ -161,7 +266,7 @@ defmodule AgentsDemoWeb.ChatLive do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
 
-  defp load_filesystem_files do
+  defp assign_filesystem_files(socket) do
     try do
       # Get all file paths from the FileSystemServer
       file_paths = FileSystemServer.list_files(@agent_id)
@@ -183,11 +288,11 @@ defmodule AgentsDemoWeb.ChatLive do
         end)
         |> Enum.into(%{})
 
-      files
+      assign(socket, :files, files)
     rescue
       _ ->
         # If FileSystemServer isn't available yet, return empty map
-        %{}
+        assign(socket, :files, %{})
     end
   end
 
