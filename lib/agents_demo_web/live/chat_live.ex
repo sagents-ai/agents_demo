@@ -1,10 +1,12 @@
 defmodule AgentsDemoWeb.ChatLive do
   use AgentsDemoWeb, :live_view
+  import AgentsDemoWeb.ChatComponents
 
   require Logger
 
   alias LangChain.Agents.AgentServer
   alias LangChain.Agents.FileSystemServer
+  alias LangChain.Agents.Todo
   alias LangChain.Message
 
   @agent_id "demo-agent-001"
@@ -39,7 +41,8 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:selected_file_path, nil)
      |> assign(:selected_file_content, nil)
      |> assign(:is_thread_history_open, false)
-     |> assign(:has_messages, false)}
+     |> assign(:has_messages, false)
+     |> assign(:streaming_content, nil)}
   end
 
   @impl true
@@ -83,7 +86,9 @@ defmodule AgentsDemoWeb.ChatLive do
           {:noreply,
            socket
            |> assign(:input, "")
-           |> assign(:loading, true)}
+           |> assign(:loading, true)
+           |> assign(:has_messages, true)
+           |> stream_insert(:messages, user_message)}
 
         {:error, reason} ->
           Logger.error("Failed to execute agent: #{inspect(reason)}")
@@ -108,23 +113,45 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("new_thread", _params, socket) do
-    # Note: This only clears the UI. The AgentServer still has its conversation history.
-    # For a true "new thread", we'd need to reset the AgentServer's state, which would
-    # require adding a reset API or restarting the AgentServer.
+    :ok = AgentServer.reset(@agent_id)
+
     {:noreply,
      socket
      |> assign(:thread_id, nil)
      |> stream(:messages, [], reset: true)
      |> assign(:has_messages, false)
-     |> assign(:todos, [])
-     |> assign(:files, %{})
+     #  |> assign(:todos, [])
+     #  |> assign(:files, %{})
      |> assign(:selected_sub_agent, nil)
-     |> push_patch(to: ~p"/chat")}
+     |> push_patch(to: ~p"/chat")
+     |> put_flash(:info, "New thread started")}
   end
 
   @impl true
   def handle_event("toggle_thread_history", _params, socket) do
     {:noreply, assign(socket, :is_thread_history_open, !socket.assigns.is_thread_history_open)}
+  end
+
+  @impl true
+  def handle_event("setup_demo_data", _params, socket) do
+    # Create sample TODO items with different states for testing
+    todos = [
+      Todo.new!(%{content: "Initialize project setup", status: :completed}),
+      Todo.new!(%{content: "Configure API endpoints", status: :in_progress}),
+      Todo.new!(%{content: "Write integration tests", status: :pending}),
+      Todo.new!(%{content: "Deploy to production", status: :pending})
+    ]
+
+    # Set TODOs on the AgentServer - the existing PubSub handlers will update the UI
+    case AgentServer.set_todos(@agent_id, todos) do
+      :ok ->
+        Logger.info("Test TODOs set successfully")
+        {:noreply, socket}
+
+      {:error, reason} ->
+        Logger.error("Failed to set test TODOs: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to set test TODOs")}
+    end
   end
 
   @impl true
@@ -221,29 +248,46 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:todo_created, todo}, socket) do
-    Logger.info("Todo created: #{todo.content}")
-    todos = socket.assigns.todos ++ [todo]
+  def handle_info({:todos_updated, todos}, socket) do
+    Logger.debug("TODOs updated: #{length(todos)} items")
     {:noreply, assign(socket, :todos, todos)}
   end
 
   @impl true
-  def handle_info({:todo_updated, todo}, socket) do
-    Logger.info("Todo updated: #{todo.content}")
+  def handle_info({:llm_deltas, deltas}, socket) do
+    # Append deltas to current streaming message
+    # deltas is a list, so we need to iterate through them
+    socket = update_streaming_message(socket, deltas)
 
-    todos =
-      Enum.map(socket.assigns.todos, fn t ->
-        if t.id == todo.id, do: todo, else: t
-      end)
-
-    {:noreply, assign(socket, :todos, todos)}
+    {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:todo_deleted, todo_id}, socket) do
-    Logger.info("Todo deleted: #{todo_id}")
-    todos = Enum.reject(socket.assigns.todos, fn t -> t.id == todo_id end)
-    {:noreply, assign(socket, :todos, todos)}
+  def handle_info({:llm_message, message}, socket) do
+    # Complete message received - finalize display
+    Logger.info("Complete LLM message received")
+
+    socket =
+      socket
+      |> finalize_streaming_message(message)
+      |> assign(:loading, false)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:llm_token_usage, usage}, socket) do
+    # Optional: Display token usage stats
+    Logger.debug("Token usage: #{inspect(usage)}")
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:tool_response, message}, socket) do
+    # Optional: Display tool execution results
+    # This could be used to show "thinking" indicators
+    Logger.debug("Tool response: #{inspect(message.content)}")
+    {:noreply, socket}
   end
 
   @impl true
@@ -265,6 +309,66 @@ defmodule AgentsDemoWeb.ChatLive do
   defp generate_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
+
+  defp update_streaming_message(socket, deltas) do
+    # Extract content from delta
+    content = extract_delta_content(delta)
+
+    # Append to streaming_content
+    current_content = socket.assigns.streaming_content || ""
+    updated_content = current_content <> content
+
+    assign(socket, :streaming_content, updated_content)
+  end
+
+  defp finalize_streaming_message(socket, message) do
+    # Use the complete message from the LLM, ignore streaming_content
+    # The message struct has the final, complete content
+    ai_message = %{
+      id: generate_id(),
+      type: :ai,
+      content: extract_message_content(message),
+      timestamp: DateTime.utc_now()
+    }
+
+    socket
+    |> assign(:streaming_content, nil)
+    |> stream_insert(:messages, ai_message)
+  end
+
+  # Extract content from MessageDelta struct
+  defp extract_delta_content(%{content: content}) when is_binary(content), do: content
+  defp extract_delta_content(%{content: [%{text: text}]}) when is_binary(text), do: text
+
+  defp extract_delta_content(%{content: content}) when is_list(content) do
+    # Handle list of content blocks
+    content
+    |> Enum.map(fn
+      %{text: text} when is_binary(text) -> text
+      %{type: "text", text: text} when is_binary(text) -> text
+      _ -> ""
+    end)
+    |> Enum.join("")
+  end
+
+  defp extract_delta_content(_), do: ""
+
+  # Extract content from Message struct
+  defp extract_message_content(%Message{content: content}) when is_binary(content), do: content
+
+  defp extract_message_content(%Message{content: content}) when is_list(content) do
+    # Handle list of content blocks
+    content
+    |> Enum.map(fn
+      %{text: text} when is_binary(text) -> text
+      %{type: "text", text: text} when is_binary(text) -> text
+      text when is_binary(text) -> text
+      _ -> ""
+    end)
+    |> Enum.join("")
+  end
+
+  defp extract_message_content(_), do: ""
 
   defp assign_filesystem_files(socket) do
     try do
@@ -296,12 +400,6 @@ defmodule AgentsDemoWeb.ChatLive do
     end
   end
 
-  defp group_files_by_directory(files) do
-    files
-    |> Enum.group_by(fn {_path, metadata} -> metadata.directory end)
-    |> Enum.sort_by(fn {directory, _files} -> directory end)
-  end
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -323,6 +421,7 @@ defmodule AgentsDemoWeb.ChatLive do
           loading={@loading}
           thread_id={@thread_id}
           is_thread_history_open={@is_thread_history_open}
+          streaming_content={@streaming_content}
         />
       </div>
 
@@ -332,319 +431,6 @@ defmodule AgentsDemoWeb.ChatLive do
           content={@selected_file_content}
         />
       <% end %>
-    </div>
-    """
-  end
-
-  # Component: Tasks/Files Sidebar
-  defp tasks_files_sidebar(assigns) do
-    ~H"""
-    <aside class={[
-      "h-screen bg-[var(--color-surface)] border-r border-[var(--color-border)] flex flex-col transition-all duration-300",
-      @collapsed && "w-[60px]",
-      !@collapsed && "w-80"
-    ]}>
-      <div class={[
-        "flex items-center border-b border-[var(--color-border)] h-[70px] flex-shrink-0",
-        @collapsed && "justify-center px-4",
-        !@collapsed && "justify-between px-6"
-      ]}>
-        <%= if not @collapsed do %>
-          <h3 class="text-lg font-semibold m-0">Tasks & Files</h3>
-          <button
-            phx-click="toggle_sidebar"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors flex-shrink-0"
-            type="button"
-            title="Collapse"
-          >
-            <.icon name="hero-chevron-left" class="w-5 h-5" />
-          </button>
-        <% else %>
-          <button
-            phx-click="toggle_sidebar"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors w-9 h-9 flex items-center justify-center"
-            type="button"
-            title="Expand"
-          >
-            <.icon name="hero-chevron-right" class="w-5 h-5" />
-          </button>
-        <% end %>
-      </div>
-
-      <%= if not @collapsed do %>
-        <div class="flex-1 overflow-y-auto flex flex-col">
-          <div class="flex bg-[var(--color-background)]">
-            <button
-              class={[
-                "flex-1 py-3 px-4 bg-transparent text-[var(--color-text-secondary)] font-medium text-sm transition-all border-b-2 relative cursor-pointer border-t-0 border-l-0 border-r-0",
-                @active_tab == "tasks" &&
-                  "text-[var(--color-primary)] border-[var(--color-primary)] font-semibold bg-[var(--color-surface)]",
-                @active_tab != "tasks" && "border-[var(--color-border)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-light)]"
-              ]}
-              phx-click="switch_tab"
-              phx-value-tab="tasks"
-              type="button"
-            >
-              Tasks
-            </button>
-            <button
-              class={[
-                "flex-1 py-3 px-4 bg-transparent text-[var(--color-text-secondary)] font-medium text-sm transition-all border-b-2 relative cursor-pointer border-t-0 border-l-0 border-r-0",
-                @active_tab == "files" &&
-                  "text-[var(--color-primary)] border-[var(--color-primary)] font-semibold bg-[var(--color-surface)]",
-                @active_tab != "files" && "border-[var(--color-border)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border-light)]"
-              ]}
-              phx-click="switch_tab"
-              phx-value-tab="files"
-              type="button"
-            >
-              Files
-            </button>
-          </div>
-
-          <div class="flex-1 p-4 overflow-y-auto">
-            <%= if @active_tab == "tasks" do %>
-              <%= if @todos == [] do %>
-                <div class="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
-                  <p class="text-[var(--color-text-secondary)] text-sm m-0">No tasks yet</p>
-                </div>
-              <% else %>
-                <div class="flex flex-col gap-2">
-                  <%= for todo <- @todos do %>
-                    <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md">
-                      <div class={[
-                        "w-2 h-2 rounded-full flex-shrink-0",
-                        todo.status == :pending && "bg-[var(--color-text-tertiary)]",
-                        todo.status == :in_progress && "bg-[var(--color-warning)]",
-                        todo.status == :completed && "bg-[var(--color-success)]"
-                      ]}>
-                      </div>
-                      <span class="text-sm">{todo.content}</span>
-                    </div>
-                  <% end %>
-                </div>
-              <% end %>
-            <% else %>
-              <%= if @files == %{} do %>
-                <div class="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
-                  <p class="text-[var(--color-text-secondary)] text-sm m-0">No files yet</p>
-                </div>
-              <% else %>
-                <div class="flex flex-col gap-3">
-                  <%!-- Group files by directory --%>
-                  <%= for {directory, dir_files} <- group_files_by_directory(@files) do %>
-                    <div class="flex flex-col gap-1">
-                      <div class="flex items-center gap-2 px-2 py-1">
-                        <.icon name="hero-folder" class="w-4 h-4 text-[var(--color-primary)] flex-shrink-0" />
-                        <span class="text-xs font-semibold text-[var(--color-text-secondary)] tracking-wide">
-                          {directory}
-                        </span>
-                      </div>
-                      <div class="flex flex-col gap-1">
-                        <%= for {path, _metadata} <- dir_files do %>
-                          <div
-                            class="flex items-center gap-2 pl-6 pr-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md cursor-pointer hover:bg-[var(--color-border-light)] transition-colors"
-                            phx-click="view_file"
-                            phx-value-path={path}
-                          >
-                            <.icon
-                              name="hero-document-text"
-                              class="w-4 h-4 text-[var(--color-text-secondary)] flex-shrink-0"
-                            />
-                            <span class="text-sm truncate" title={path}>{Path.basename(path)}</span>
-                          </div>
-                        <% end %>
-                      </div>
-                    </div>
-                  <% end %>
-                </div>
-              <% end %>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    </aside>
-    """
-  end
-
-  # Component: Chat Interface
-  defp chat_interface(assigns) do
-    ~H"""
-    <div class="flex flex-col h-screen w-full bg-[var(--color-background)]">
-      <header class="flex justify-between items-center px-6 h-[70px] border-b border-[var(--color-border)] bg-[var(--color-background)] flex-shrink-0">
-        <div class="flex items-center gap-3">
-          <.icon name="hero-chat-bubble-left-right" class="w-7 h-7 text-[var(--color-primary)]" />
-          <h1 class="text-2xl font-semibold m-0">Agents Demo</h1>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <button
-            phx-click="toggle_thread_history"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="Thread History"
-          >
-            <.icon name="hero-clock" class="w-5 h-5" />
-          </button>
-
-          <button
-            phx-click="new_thread"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="New Thread"
-          >
-            <.icon name="hero-document-plus" class="w-5 h-5" />
-          </button>
-        </div>
-      </header>
-
-      <div class="flex flex-1 relative overflow-hidden">
-        <%= if @is_thread_history_open do %>
-          <div class="w-80 border-r border-[var(--color-border)] bg-[var(--color-surface)] overflow-y-auto flex-shrink-0 flex flex-col">
-            <div class="flex justify-between items-center px-6 py-4 border-b border-[var(--color-border)]">
-              <h3 class="m-0 text-lg">Thread History</h3>
-              <button
-                phx-click="toggle_thread_history"
-                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded"
-                type="button"
-              >
-                <.icon name="hero-x-mark" class="w-5 h-5" />
-              </button>
-            </div>
-            <div class="flex-1 p-4">
-              <p class="text-[var(--color-text-secondary)] text-sm">No threads yet</p>
-            </div>
-          </div>
-        <% end %>
-
-        <div class="flex flex-1 flex-col overflow-hidden relative">
-          <%= if not @has_messages do %>
-            <div class="flex flex-col items-center justify-center h-full px-12 py-12 text-center">
-              <.icon name="hero-chat-bubble-left-right" class="w-16 h-16 text-[var(--color-text-tertiary)] mb-6" />
-              <h2 class="mb-2 text-[var(--color-text-primary)]">Start a Conversation</h2>
-              <p class="text-[var(--color-text-secondary)] m-0">Ask me anything to get started</p>
-            </div>
-          <% end %>
-
-          <%= if @has_messages do %>
-            <div class="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-6" id="messages-list" phx-update="stream">
-              <div :for={{id, message} <- @streams.messages} id={id}>
-                <.message message={message} />
-              </div>
-            </div>
-          <% end %>
-
-          <%= if @loading do %>
-            <div class="flex items-center gap-2 px-6 py-4 text-[var(--color-text-secondary)]">
-              <div class="w-4 h-4 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin">
-              </div>
-              <span>Thinking...</span>
-            </div>
-          <% end %>
-        </div>
-      </div>
-
-      <form phx-submit="send_message" class="flex gap-3 px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-background)] flex-shrink-0">
-        <input
-          type="text"
-          name="message"
-          value={@input}
-          phx-change="update_input"
-          placeholder="Type your message..."
-          class="flex-1 px-4 py-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text-primary)] text-base outline-none focus:border-[var(--color-primary)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          autocomplete="off"
-          disabled={@loading}
-        />
-        <button
-          type="submit"
-          class="px-4 py-3 bg-[var(--color-primary)] text-white border-none rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed min-w-[48px]"
-          disabled={@loading || @input == ""}
-        >
-          <.icon name="hero-paper-airplane" class="w-5 h-5" />
-        </button>
-      </form>
-    </div>
-    """
-  end
-
-  # Component: Individual Message
-  defp message(assigns) do
-    ~H"""
-    <div class="flex gap-4 max-w-full">
-      <div class={[
-        "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
-        @message.type == :human && "bg-[var(--color-user-message)] text-white",
-        @message.type == :ai && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]"
-      ]}>
-        <%= if @message.type == :human do %>
-          <.icon name="hero-user" class="w-5 h-5" />
-        <% else %>
-          <.icon name="hero-cpu-chip" class="w-5 h-5" />
-        <% end %>
-      </div>
-
-      <div class="flex-1 min-w-0">
-        <div class={[
-          "px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
-          @message.type == :human &&
-            "bg-[var(--color-user-message)] text-white",
-          @message.type == :ai && "bg-[var(--color-surface)]"
-        ]}>
-          {@message.content}
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  # Component: File Viewer Modal
-  defp file_viewer_modal(assigns) do
-    ~H"""
-    <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div
-        class="bg-[var(--color-surface)] rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col"
-        phx-click-away="close_file_modal"
-      >
-        <%!-- Modal Header --%>
-        <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
-          <div class="flex items-center gap-3">
-            <.icon name="hero-document-text" class="w-6 h-6 text-[var(--color-primary)]" />
-            <h2 class="text-lg font-semibold text-[var(--color-text-primary)] m-0">
-              {Path.basename(@path)}
-            </h2>
-          </div>
-          <button
-            phx-click="close_file_modal"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="Close"
-          >
-            <.icon name="hero-x-mark" class="w-5 h-5" />
-          </button>
-        </div>
-        <%!-- File Path --%>
-        <div class="px-6 py-2 bg-[var(--color-background)] border-b border-[var(--color-border)]">
-          <span class="text-xs text-[var(--color-text-secondary)] font-mono">{@path}</span>
-        </div>
-        <%!-- File Content --%>
-        <div class="flex-1 overflow-hidden p-6">
-          <textarea
-            readonly
-            class="w-full h-full px-4 py-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-background)] text-[var(--color-text-primary)] text-sm font-mono resize-none focus:outline-none focus:border-[var(--color-primary)] transition-colors"
-            style="min-height: 400px;"
-          >{@content}</textarea>
-        </div>
-        <%!-- Modal Footer --%>
-        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
-          <button
-            phx-click="close_file_modal"
-            class="px-4 py-2 bg-[var(--color-primary)] text-white border-none rounded-lg hover:opacity-90 transition-opacity"
-            type="button"
-          >
-            Close
-          </button>
-        </div>
-      </div>
     </div>
     """
   end
