@@ -2,6 +2,8 @@ defmodule AgentsDemoWeb.ChatComponents do
   use Phoenix.Component
   import AgentsDemoWeb.CoreComponents
 
+  alias LangChain.MessageDelta
+
   attr :collapsed, :boolean, default: false
   attr :active_tab, :string, default: "tasks"
   attr :todos, :list
@@ -217,7 +219,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :is_thread_history_open, :boolean, default: false
   attr :has_messages, :boolean, default: false
   attr :loading, :boolean, default: false
-  attr :streaming_content, :any
+  attr :streaming_delta, :any
   attr :streams, :any
   attr :input, :string, doc: "The user input being drafted for a new message"
 
@@ -304,13 +306,13 @@ defmodule AgentsDemoWeb.ChatComponents do
             </div>
           <% end %>
 
-          <%= if @streaming_content do %>
+          <%= if @streaming_delta != nil do %>
             <div class="px-6 py-4">
-              <.streaming_message content={@streaming_content} />
+              <.streaming_message streaming_delta={@streaming_delta} />
             </div>
           <% end %>
 
-          <%= if @loading && !@streaming_content do %>
+          <%= if @loading && @streaming_delta == nil do %>
             <div class="flex items-center gap-2 px-6 py-4 text-[var(--color-text-secondary)]">
               <div class="w-4 h-4 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin">
               </div>
@@ -378,10 +380,18 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
-  attr :content, :string
+  attr :streaming_delta, :any, required: true
 
   # Component: Streaming Message (being typed)
   def streaming_message(assigns) do
+    # Convert merged_content to string for display
+    assigns =
+      assign(
+        assigns,
+        :content,
+        MessageDelta.content_to_string(assigns.streaming_delta, :text) || ""
+      )
+
     ~H"""
     <div class="flex gap-4 max-w-full">
       <div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-[var(--color-avatar-bg)] text-[var(--color-primary)]">

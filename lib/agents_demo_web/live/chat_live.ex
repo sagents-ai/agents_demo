@@ -8,6 +8,7 @@ defmodule AgentsDemoWeb.ChatLive do
   alias LangChain.Agents.FileSystemServer
   alias LangChain.Agents.Todo
   alias LangChain.Message
+  alias LangChain.MessageDelta
 
   @agent_id "demo-agent-001"
 
@@ -42,7 +43,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:selected_file_content, nil)
      |> assign(:is_thread_history_open, false)
      |> assign(:has_messages, false)
-     |> assign(:streaming_content, nil)}
+     |> assign(:streaming_delta, nil)}
   end
 
   @impl true
@@ -311,18 +312,15 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   defp update_streaming_message(socket, deltas) do
-    # Extract content from delta
-    content = extract_delta_content(delta)
+    # Merge deltas into the accumulated streaming_delta
+    current_delta = socket.assigns.streaming_delta
+    updated_delta = MessageDelta.merge_deltas(current_delta, deltas)
 
-    # Append to streaming_content
-    current_content = socket.assigns.streaming_content || ""
-    updated_content = current_content <> content
-
-    assign(socket, :streaming_content, updated_content)
+    assign(socket, :streaming_delta, updated_delta)
   end
 
   defp finalize_streaming_message(socket, message) do
-    # Use the complete message from the LLM, ignore streaming_content
+    # Use the complete message from the LLM
     # The message struct has the final, complete content
     ai_message = %{
       id: generate_id(),
@@ -332,26 +330,9 @@ defmodule AgentsDemoWeb.ChatLive do
     }
 
     socket
-    |> assign(:streaming_content, nil)
+    |> assign(:streaming_delta, nil)
     |> stream_insert(:messages, ai_message)
   end
-
-  # Extract content from MessageDelta struct
-  defp extract_delta_content(%{content: content}) when is_binary(content), do: content
-  defp extract_delta_content(%{content: [%{text: text}]}) when is_binary(text), do: text
-
-  defp extract_delta_content(%{content: content}) when is_list(content) do
-    # Handle list of content blocks
-    content
-    |> Enum.map(fn
-      %{text: text} when is_binary(text) -> text
-      %{type: "text", text: text} when is_binary(text) -> text
-      _ -> ""
-    end)
-    |> Enum.join("")
-  end
-
-  defp extract_delta_content(_), do: ""
 
   # Extract content from Message struct
   defp extract_message_content(%Message{content: content}) when is_binary(content), do: content
@@ -421,7 +402,7 @@ defmodule AgentsDemoWeb.ChatLive do
           loading={@loading}
           thread_id={@thread_id}
           is_thread_history_open={@is_thread_history_open}
-          streaming_content={@streaming_content}
+          streaming_delta={@streaming_delta}
         />
       </div>
 
