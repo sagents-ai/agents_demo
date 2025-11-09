@@ -12,6 +12,19 @@ defmodule AgentsDemo.Application do
   alias LangChain.Agents.FileSystem.FileSystemConfig
   alias LangChain.Agents.FileSystem.Persistence.Disk
 
+
+  # New anthropic models to use
+  @claude_model "claude-sonnet-4-5-20250929"
+  # @bedrock_claude_model "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+  # # # anthropic models to use
+  # # @claude_model "claude-3-7-sonnet-latest"
+  # # @bedrock_claude_model "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+
+  # # Title models
+  # @title_model "claude-3-5-haiku-latest"
+  # @title_fallback_bedrock_model "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+
   @impl true
   def start(_type, _args) do
     # Configure the agent and filesystem
@@ -52,7 +65,7 @@ defmodule AgentsDemo.Application do
     # Create the ChatModel
     model =
       ChatAnthropic.new!(%{
-        model: "claude-3-5-sonnet-20241022",
+        model: @claude_model,
         api_key: api_key,
         temperature: 0.7
       })
