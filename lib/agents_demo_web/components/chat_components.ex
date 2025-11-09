@@ -356,11 +356,11 @@ defmodule AgentsDemoWeb.ChatComponents do
     <div class="flex gap-4 max-w-full">
       <div class={[
         "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
-        @message.type == :human && "bg-[var(--color-user-message)] text-white",
-        @message.type == :ai && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
+        @message.type == :user && "bg-[var(--color-user-message)] text-white",
+        @message.type == :assistant && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
         @message.type == :tool && "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
       ]}>
-        <%= if @message.type == :human do %>
+        <%= if @message.type == :user do %>
           <.icon name="hero-user" class="w-5 h-5" />
         <% else %>
           <.icon name="hero-cpu-chip" class="w-5 h-5" />
@@ -371,12 +371,12 @@ defmodule AgentsDemoWeb.ChatComponents do
         <%= if @message.content && @message.content != "" do %>
           <div class={[
             "px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
-            @message.type == :human &&
+            @message.type == :user &&
               "bg-[var(--color-user-message)] text-white",
-            @message.type == :ai && "bg-[var(--color-surface)]",
+            @message.type == :assistant && "bg-[var(--color-surface)]",
             @message.type == :tool && "bg-[var(--color-background)]"
           ]}>
-            <.markdown text={@message.content} invert={@message.type == :human} />
+            <.markdown text={@message.content} invert={@message.type == :user} />
           </div>
         <% end %>
 

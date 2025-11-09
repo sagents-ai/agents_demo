@@ -74,7 +74,7 @@ defmodule AgentsDemoWeb.ChatLive do
       # Add user message immediately to UI
       user_message = %{
         id: generate_id(),
-        type: :human,
+        type: :user,
         content: message_text,
         timestamp: DateTime.utc_now()
       }
@@ -248,9 +248,9 @@ defmodule AgentsDemoWeb.ChatLive do
 
     case assistant_messages do
       %Message{content: content} when is_binary(content) ->
-        ai_message = %{
+        assistant_message = %{
           id: generate_id(),
-          type: :ai,
+          type: :assistant,
           content: content,
           timestamp: DateTime.utc_now()
         }
@@ -267,7 +267,7 @@ defmodule AgentsDemoWeb.ChatLive do
          socket
          |> assign(:loading, false)
          |> assign_filesystem_files()
-         |> stream_insert(:messages, ai_message)}
+         |> stream_insert(:messages, assistant_message)}
 
       _ ->
         Logger.warning("No assistant message found in completed state")
@@ -282,7 +282,7 @@ defmodule AgentsDemoWeb.ChatLive do
 
     error_message = %{
       id: generate_id(),
-      type: :ai,
+      type: :assistant,
       content: "Sorry, I encountered an error: #{inspect(reason)}",
       timestamp: DateTime.utc_now()
     }
@@ -369,7 +369,7 @@ defmodule AgentsDemoWeb.ChatLive do
     # The message struct has the final, complete content
     ui_message = %{
       id: generate_id(),
-      type: message_role_to_ui_type(message.role),
+      type: message.role,
       content: extract_message_content(message),
       tool_calls: message.tool_calls,
       tool_results: message.tool_results,
@@ -381,13 +381,6 @@ defmodule AgentsDemoWeb.ChatLive do
     |> assign(:has_messages, true)
     |> stream_insert(:messages, ui_message)
   end
-
-  # Convert LangChain message role to UI message type
-  defp message_role_to_ui_type(:system), do: :system
-  defp message_role_to_ui_type(:user), do: :human
-  defp message_role_to_ui_type(:assistant), do: :ai
-  defp message_role_to_ui_type(:tool), do: :tool
-  defp message_role_to_ui_type(_), do: :unknown
 
   # Extract content from Message struct
   defp extract_message_content(%Message{content: content}) when is_binary(content), do: content
