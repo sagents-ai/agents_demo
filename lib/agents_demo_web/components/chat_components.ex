@@ -325,7 +325,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
       <form
         phx-submit="send_message"
-        class="flex gap-3 px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-background)] flex-shrink-0"
+        class="flex gap-3 px-6 py-5 border-t-2 border-[var(--color-border)] bg-[var(--color-background)] flex-shrink-0 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]"
       >
         <input
           type="text"
@@ -333,13 +333,13 @@ defmodule AgentsDemoWeb.ChatComponents do
           value={@input}
           phx-change="update_input"
           placeholder="Type your message..."
-          class="flex-1 px-4 py-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text-primary)] text-base outline-none focus:border-[var(--color-primary)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          class="flex-1 px-5 py-3.5 border-2 border-[var(--color-border)] rounded-xl bg-white dark:bg-[var(--color-surface)] text-[var(--color-text-primary)] text-base outline-none focus:border-[var(--color-user-message)] focus:ring-4 focus:ring-[var(--color-user-message)]/10 hover:border-[var(--color-text-tertiary)] transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           autocomplete="off"
           disabled={@loading}
         />
         <button
           type="submit"
-          class="px-4 py-3 bg-[var(--color-primary)] text-white border-none rounded-lg hover:opacity-90 transition-opacity flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed min-w-[48px]"
+          class="px-5 py-3.5 bg-[var(--color-user-message)] text-white border-none rounded-xl hover:opacity-90 hover:shadow-lg transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed min-w-[56px] shadow-md"
           disabled={@loading || @input == ""}
         >
           <.icon name="hero-paper-airplane" class="w-5 h-5" />

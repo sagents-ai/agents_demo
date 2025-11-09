@@ -159,7 +159,8 @@ defmodule AgentsDemoWeb.ChatLive do
       ToolResult.new!(%{
         tool_call_id: "call_abc123",
         name: "search_web",
-        content: "Found 5 top attractions: Vigeland Park, Oslo Opera House, Akershus Fortress, Viking Ship Museum, and the Royal Palace."
+        content:
+          "Found 5 top attractions: Vigeland Park, Oslo Opera House, Akershus Fortress, Viking Ship Museum, and the Royal Palace."
       })
 
     tool_call_2 =
@@ -173,18 +174,20 @@ defmodule AgentsDemoWeb.ChatLive do
       ToolResult.new!(%{
         tool_call_id: "call_def456",
         name: "get_weather",
-        content: "Spring weather in Oslo: Average temperature 8-15°C, mild with occasional rain. Best time to visit is late April to May."
+        content:
+          "Spring weather in Oslo: Average temperature 8-15°C, mild with occasional rain. Best time to visit is late April to May."
       })
 
     messages = [
-      Message.new_system!("You are a helpful travel assistant specialized in Norwegian destinations."),
       Message.new_user!("What sights should I see when I visit Oslo in the Spring?"),
       Message.new_assistant!(%{
         content: "Let me search for information about Oslo attractions and the Spring weather.",
         tool_calls: [tool_call_1, tool_call_2]
       }),
       Message.new_tool_result!(%{tool_results: [tool_result_1, tool_result_2]}),
-      Message.new_assistant!("Based on the search results, here are my top recommendations for visiting Oslo in Spring:\n\n1. **Vigeland Park** - Perfect for spring walks among 200+ sculptures\n2. **Oslo Opera House** - Iconic architecture with rooftop views\n3. **Akershus Fortress** - Medieval castle with harbor views\n4. **Viking Ship Museum** - Explore Norway's Viking heritage\n5. **Royal Palace** - Beautiful palace grounds ideal for spring strolls\n\nSpring is an excellent time to visit with temperatures ranging from 8-15°C. Late April to May offers the best weather with blooming flowers throughout the city!")
+      Message.new_assistant!(
+        "Based on the search results, here are my top recommendations for visiting Oslo in Spring:\n\n1. **Vigeland Park** - Perfect for spring walks among 200+ sculptures\n2. **Oslo Opera House** - Iconic architecture with rooftop views\n3. **Akershus Fortress** - Medieval castle with harbor views\n4. **Viking Ship Museum** - Explore Norway's Viking heritage\n5. **Royal Palace** - Beautiful palace grounds ideal for spring strolls\n\nSpring is an excellent time to visit with temperatures ranging from 8-15°C. Late April to May offers the best weather with blooming flowers throughout the city!"
+      )
     ]
 
     # Set TODOs and messages on the AgentServer
@@ -280,10 +283,19 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_info({:status_changed, :error, reason}, socket) do
     Logger.error("Agent execution failed: #{inspect(reason)}")
 
+    error_display =
+      case reason do
+        %LangChain.LangChainError{} = error ->
+          error.message
+
+        other ->
+          inspect(other)
+      end
+
     error_message = %{
       id: generate_id(),
       type: :assistant,
-      content: "Sorry, I encountered an error: #{inspect(reason)}",
+      content: "Sorry, I encountered an error: #{error_display}",
       timestamp: DateTime.utc_now()
     }
 
