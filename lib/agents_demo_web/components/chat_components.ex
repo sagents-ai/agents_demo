@@ -373,7 +373,7 @@ defmodule AgentsDemoWeb.ChatComponents do
             "bg-[var(--color-user-message)] text-white",
           @message.type == :ai && "bg-[var(--color-surface)]"
         ]}>
-          <.markdown text={@message.content} />
+          <.markdown text={@message.content} invert={@message.type == :human} />
         </div>
       </div>
     </div>
@@ -510,6 +510,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   """
   attr :text, :string, required: true
   attr :class, :string, default: nil
+  attr :invert, :boolean, default: false
   attr :rest, :global
 
   def markdown(%{text: nil} = assigns), do: ~H""
@@ -518,7 +519,12 @@ defmodule AgentsDemoWeb.ChatComponents do
     ~H"""
     <div class="w-full">
       <div
-        class={["prose max-w-none dark:prose-invert prose-pre:whitespace-pre-wrap", @class]}
+        class={[
+          "prose max-w-none prose-pre:whitespace-pre-wrap",
+          @invert && "prose-invert text-white",
+          !@invert && "dark:prose-invert",
+          @class
+        ]}
         {@rest}
       >
         {render_markdown(@text)}
