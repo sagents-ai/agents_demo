@@ -3,6 +3,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   import AgentsDemoWeb.CoreComponents
 
   alias LangChain.MessageDelta
+  alias LangChain.Message.ContentPart
 
   attr :collapsed, :boolean, default: false
   attr :active_tab, :string, default: "tasks"
@@ -484,6 +485,10 @@ defmodule AgentsDemoWeb.ChatComponents do
     Jason.encode!(content, pretty: true)
   rescue
     _ -> inspect(content)
+  end
+
+  defp format_tool_result_content(contents) when is_list(contents) do
+    ContentPart.parts_to_string(contents)
   end
 
   defp format_tool_result_content(content), do: inspect(content)
