@@ -357,7 +357,8 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class={[
         "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
         @message.type == :human && "bg-[var(--color-user-message)] text-white",
-        @message.type == :ai && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]"
+        @message.type == :ai && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
+        @message.type == :tool && "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
       ]}>
         <%= if @message.type == :human do %>
           <.icon name="hero-user" class="w-5 h-5" />
@@ -366,19 +367,131 @@ defmodule AgentsDemoWeb.ChatComponents do
         <% end %>
       </div>
 
-      <div class="flex-1 min-w-0">
-        <div class={[
-          "px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
-          @message.type == :human &&
-            "bg-[var(--color-user-message)] text-white",
-          @message.type == :ai && "bg-[var(--color-surface)]"
-        ]}>
-          <.markdown text={@message.content} invert={@message.type == :human} />
-        </div>
+      <div class="flex-1 min-w-0 flex flex-col gap-3">
+        <%= if @message.content && @message.content != "" do %>
+          <div class={[
+            "px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
+            @message.type == :human &&
+              "bg-[var(--color-user-message)] text-white",
+            @message.type == :ai && "bg-[var(--color-surface)]",
+            @message.type == :tool && "bg-[var(--color-background)]"
+          ]}>
+            <.markdown text={@message.content} invert={@message.type == :human} />
+          </div>
+        <% end %>
+
+        <%!-- Render tool calls if present --%>
+        <%= if Map.get(@message, :tool_calls) && length(@message.tool_calls) > 0 do %>
+          <div class="flex flex-col gap-2">
+            <%= for tool_call <- @message.tool_calls do %>
+              <.tool_call_item tool_call={tool_call} />
+            <% end %>
+          </div>
+        <% end %>
+
+        <%!-- Render tool results if present --%>
+        <%= if Map.get(@message, :tool_results) && length(@message.tool_results) > 0 do %>
+          <div class="flex flex-col gap-2">
+            <%= for tool_result <- @message.tool_results do %>
+              <.tool_result_item tool_result={tool_result} />
+            <% end %>
+          </div>
+        <% end %>
       </div>
     </div>
     """
   end
+
+  attr :tool_call, :any, required: true
+
+  # Component: Tool Call Display
+  def tool_call_item(assigns) do
+    # Format arguments as JSON string for display
+    assigns = assign(assigns, :args_json, format_tool_arguments(assigns.tool_call.arguments))
+
+    ~H"""
+    <div class="bg-[var(--color-background)] border border-[var(--color-border)] rounded-lg p-3">
+      <div class="flex items-center gap-2 mb-2">
+        <.icon name="hero-wrench-screwdriver" class="w-4 h-4 text-[var(--color-primary)]" />
+        <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+          Tool Call: {@tool_call.name}
+        </span>
+      </div>
+      <%= if @args_json && @args_json != "{}" do %>
+        <div class="mt-2 pl-6">
+          <details class="text-xs">
+            <summary class="cursor-pointer text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
+              Arguments
+            </summary>
+            <pre class="mt-2 p-2 bg-[var(--color-surface)] rounded text-[var(--color-text-secondary)] overflow-x-auto"><code>{@args_json}</code></pre>
+          </details>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr :tool_result, :any, required: true
+
+  # Component: Tool Result Display
+  def tool_result_item(assigns) do
+    assigns = assign(assigns, :is_error, is_tool_error(assigns.tool_result))
+
+    ~H"""
+    <div class={[
+      "border rounded-lg p-3",
+      @is_error && "bg-red-50 border-red-200",
+      !@is_error && "bg-[var(--color-surface)] border-[var(--color-border)]"
+    ]}>
+      <div class="flex items-center gap-2 mb-2">
+        <.icon
+          name={if @is_error, do: "hero-exclamation-triangle", else: "hero-check-circle"}
+          class={if @is_error, do: "w-4 h-4 text-red-600", else: "w-4 h-4 text-green-600"}
+        />
+        <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+          Tool Result: {@tool_result.name}
+        </span>
+      </div>
+      <div class="pl-6 text-sm text-[var(--color-text-secondary)]">
+        <details open>
+          <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
+            Response
+          </summary>
+          <div class="mt-2 p-2 bg-[var(--color-background)] rounded">
+            {format_tool_result_content(@tool_result.content)}
+          </div>
+        </details>
+      </div>
+    </div>
+    """
+  end
+
+  # Helper function to format tool arguments as JSON
+  defp format_tool_arguments(nil), do: "{}"
+
+  defp format_tool_arguments(args) when is_map(args) do
+    Jason.encode!(args, pretty: true)
+  rescue
+    _ -> inspect(args)
+  end
+
+  defp format_tool_arguments(args), do: inspect(args)
+
+  # Helper function to format tool result content
+  defp format_tool_result_content(content) when is_binary(content), do: content
+
+  defp format_tool_result_content(content) when is_map(content) do
+    Jason.encode!(content, pretty: true)
+  rescue
+    _ -> inspect(content)
+  end
+
+  defp format_tool_result_content(content), do: inspect(content)
+
+  # Helper function to determine if a tool result is an error
+  defp is_tool_error(%{is_error: true}), do: true
+  defp is_tool_error(%{status: :error}), do: true
+  defp is_tool_error(_), do: false
 
   attr :streaming_delta, :any, required: true
 
@@ -469,9 +582,6 @@ defmodule AgentsDemoWeb.ChatComponents do
       markdown: md_content,
       extension: [
         strikethrough: true,
-        # This is a security risk. But it enables the mermaid extension that
-        # embeds a script tag.
-        tagfilter: false,
         table: true,
         autolink: true,
         tasklist: true,
