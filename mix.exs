@@ -67,6 +67,7 @@ defmodule AgentsDemo.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
+      {:mdex, "~> 0.9.4"},
       {:tidewave, "~> 0.5", only: :dev}
     ]
   end

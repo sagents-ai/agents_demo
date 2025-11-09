@@ -373,7 +373,7 @@ defmodule AgentsDemoWeb.ChatComponents do
             "bg-[var(--color-user-message)] text-white",
           @message.type == :ai && "bg-[var(--color-surface)]"
         ]}>
-          {@message.content}
+          <.markdown text={@message.content} />
         </div>
       </div>
     </div>
@@ -458,6 +458,70 @@ defmodule AgentsDemoWeb.ChatComponents do
             Close
           </button>
         </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp mdex_config(md_content) do
+    [
+      streaming: true,
+      markdown: md_content,
+      extension: [
+        strikethrough: true,
+        # This is a security risk. But it enables the mermaid extension that
+        # embeds a script tag.
+        tagfilter: false,
+        table: true,
+        autolink: true,
+        tasklist: true,
+        footnotes: true,
+        shortcodes: true
+      ],
+      parse: [
+        smart: true,
+        relaxed_tasklist_matching: true,
+        relaxed_autolinks: true
+      ],
+      render: [
+        unsafe_: true
+      ]
+      # syntax_highlight: [formatter: {:html_inline, theme: "github_light"}]
+    ]
+  end
+
+  @doc """
+  Render the raw content as markdown. Returns HTML rendered text.
+  """
+  def render_markdown(nil), do: Phoenix.HTML.raw(nil)
+
+  def render_markdown(text) when is_binary(text) do
+    # NOTE: This allows explicit HTML to come through.
+    #   - Don't allow this with user input.
+    text
+    |> mdex_config()
+    |> MDEx.new()
+    |> MDEx.to_html!()
+    |> Phoenix.HTML.raw()
+  end
+
+  @doc """
+  Render a markdown containing web component.
+  """
+  attr :text, :string, required: true
+  attr :class, :string, default: nil
+  attr :rest, :global
+
+  def markdown(%{text: nil} = assigns), do: ~H""
+
+  def markdown(assigns) do
+    ~H"""
+    <div class="w-full">
+      <div
+        class={["prose max-w-none dark:prose-invert prose-pre:whitespace-pre-wrap", @class]}
+        {@rest}
+      >
+        {render_markdown(@text)}
       </div>
     </div>
     """
