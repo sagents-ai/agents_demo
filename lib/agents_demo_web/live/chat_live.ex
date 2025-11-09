@@ -273,8 +273,6 @@ defmodule AgentsDemoWeb.ChatLive do
          |> stream_insert(:messages, assistant_message)}
 
       _ ->
-        Logger.warning("No assistant message found in completed state")
-
         {:noreply, assign(socket, :loading, false)}
     end
   end
