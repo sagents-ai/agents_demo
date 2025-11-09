@@ -8,6 +8,9 @@ defmodule AgentsDemoWeb.ChatLive do
   alias LangChain.Agents.FileSystemServer
   alias LangChain.Agents.Todo
   alias LangChain.Message
+  alias LangChain.Message.ContentPart
+  alias LangChain.Message.ToolCall
+  alias LangChain.Message.ToolResult
   alias LangChain.MessageDelta
 
   @agent_id "demo-agent-001"
@@ -143,15 +146,57 @@ defmodule AgentsDemoWeb.ChatLive do
       Todo.new!(%{content: "Deploy to production", status: :pending})
     ]
 
-    # Set TODOs on the AgentServer - the existing PubSub handlers will update the UI
-    case AgentServer.set_todos(@agent_id, todos) do
-      :ok ->
-        Logger.info("Test TODOs set successfully")
-        {:noreply, socket}
+    # Create sample messages with different types for testing
+    # Include tool calls and tool results to test UI rendering
+    tool_call_1 =
+      ToolCall.new!(%{
+        call_id: "call_abc123",
+        name: "search_web",
+        arguments: %{"query" => "Oslo attractions in Spring"}
+      })
 
+    tool_result_1 =
+      ToolResult.new!(%{
+        tool_call_id: "call_abc123",
+        name: "search_web",
+        content: "Found 5 top attractions: Vigeland Park, Oslo Opera House, Akershus Fortress, Viking Ship Museum, and the Royal Palace."
+      })
+
+    tool_call_2 =
+      ToolCall.new!(%{
+        call_id: "call_def456",
+        name: "get_weather",
+        arguments: %{"location" => "Oslo", "season" => "Spring"}
+      })
+
+    tool_result_2 =
+      ToolResult.new!(%{
+        tool_call_id: "call_def456",
+        name: "get_weather",
+        content: "Spring weather in Oslo: Average temperature 8-15°C, mild with occasional rain. Best time to visit is late April to May."
+      })
+
+    messages = [
+      Message.new_system!("You are a helpful travel assistant specialized in Norwegian destinations."),
+      Message.new_user!("What sights should I see when I visit Oslo in the Spring?"),
+      Message.new_assistant!(%{
+        content: "Let me search for information about Oslo attractions and the Spring weather.",
+        tool_calls: [tool_call_1, tool_call_2]
+      }),
+      Message.new_tool_result!(%{tool_results: [tool_result_1, tool_result_2]}),
+      Message.new_assistant!("Based on the search results, here are my top recommendations for visiting Oslo in Spring:\n\n1. **Vigeland Park** - Perfect for spring walks among 200+ sculptures\n2. **Oslo Opera House** - Iconic architecture with rooftop views\n3. **Akershus Fortress** - Medieval castle with harbor views\n4. **Viking Ship Museum** - Explore Norway's Viking heritage\n5. **Royal Palace** - Beautiful palace grounds ideal for spring strolls\n\nSpring is an excellent time to visit with temperatures ranging from 8-15°C. Late April to May offers the best weather with blooming flowers throughout the city!")
+    ]
+
+    # Set TODOs and messages on the AgentServer
+    # The existing PubSub handlers will update the UI
+    with :ok <- AgentServer.set_todos(@agent_id, todos),
+         :ok <- AgentServer.set_messages(@agent_id, messages) do
+      Logger.info("Demo data (TODOs and messages) set successfully")
+      {:noreply, socket}
+    else
       {:error, reason} ->
-        Logger.error("Failed to set test TODOs: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "Failed to set test TODOs")}
+        Logger.error("Failed to set demo data: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to set demo data")}
     end
   end
 
@@ -322,31 +367,37 @@ defmodule AgentsDemoWeb.ChatLive do
   defp finalize_streaming_message(socket, message) do
     # Use the complete message from the LLM
     # The message struct has the final, complete content
-    ai_message = %{
+    ui_message = %{
       id: generate_id(),
-      type: :ai,
+      type: message_role_to_ui_type(message.role),
       content: extract_message_content(message),
+      tool_calls: message.tool_calls,
+      tool_results: message.tool_results,
       timestamp: DateTime.utc_now()
     }
 
     socket
     |> assign(:streaming_delta, nil)
-    |> stream_insert(:messages, ai_message)
+    |> assign(:has_messages, true)
+    |> stream_insert(:messages, ui_message)
   end
+
+  # Convert LangChain message role to UI message type
+  defp message_role_to_ui_type(:system), do: :system
+  defp message_role_to_ui_type(:user), do: :human
+  defp message_role_to_ui_type(:assistant), do: :ai
+  defp message_role_to_ui_type(:tool), do: :tool
+  defp message_role_to_ui_type(_), do: :unknown
 
   # Extract content from Message struct
   defp extract_message_content(%Message{content: content}) when is_binary(content), do: content
 
   defp extract_message_content(%Message{content: content}) when is_list(content) do
-    # Handle list of content blocks
-    content
-    |> Enum.map(fn
-      %{text: text} when is_binary(text) -> text
-      %{type: "text", text: text} when is_binary(text) -> text
-      text when is_binary(text) -> text
-      _ -> ""
-    end)
-    |> Enum.join("")
+    # Handle list of ContentPart structs
+    case ContentPart.parts_to_string(content) do
+      nil -> ""
+      text -> text
+    end
   end
 
   defp extract_message_content(_), do: ""
