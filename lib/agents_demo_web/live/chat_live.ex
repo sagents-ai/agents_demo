@@ -243,6 +243,15 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_info({:status_changed, :completed, final_state}, socket) do
     Logger.info("Agent completed execution")
 
+
+# TODO: The status_changed event should not be creating the assistant message. The llm_message callback should do that.
+
+# TODO: What is the message structure used in the messages stream? The
+# `handle_info({:status_changed, ...` is converting it to a bare map. Is that
+# what it's doing? It might be okay as it's actually gets closer to a separate
+# DB-backed version. However, the current state of this needs to be understood.
+
+
     # Extract the last assistant message from the state
     assistant_messages =
       final_state.messages
@@ -258,19 +267,12 @@ defmodule AgentsDemoWeb.ChatLive do
           timestamp: DateTime.utc_now()
         }
 
-        # Update todos if they changed
-        socket =
-          if final_state.todos != socket.assigns.todos do
-            assign(socket, :todos, final_state.todos)
-          else
-            socket
-          end
-
         {:noreply,
          socket
          |> assign(:loading, false)
          |> assign_filesystem_files()
-         |> stream_insert(:messages, assistant_message)}
+         |> stream_insert(:messages, assistant_message)
+        }
 
       _ ->
         {:noreply, assign(socket, :loading, false)}
