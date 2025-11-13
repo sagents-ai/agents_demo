@@ -81,7 +81,13 @@ defmodule AgentsDemo.Application do
         You can read, write, and manage files in the /Memories directory.
         Be friendly, helpful, and demonstrate your file system capabilities when appropriate.
         """,
-        name: "Demo Agent"
+        name: "Demo Agent",
+        # Adding "Human In The Loop" (hitl) control for writing and deleting
+        # files
+        interrupt_on: %{
+          "write_file" => true,
+          "delete_file" => true
+        }
       )
 
     # Get the absolute path to the demo_memories directory

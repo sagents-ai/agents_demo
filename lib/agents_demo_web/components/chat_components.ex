@@ -223,6 +223,9 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :streaming_delta, :any
   attr :streams, :any
   attr :input, :string, doc: "The user input being drafted for a new message"
+  attr :agent_status, :atom, default: :idle
+  attr :pending_tools, :list, default: []
+  attr :hitl_test_mode, :boolean, default: false
 
   # Component: Chat Interface
   def chat_interface(assigns) do
@@ -260,6 +263,15 @@ defmodule AgentsDemoWeb.ChatComponents do
             title="Test TODOs"
           >
             <.icon name="hero-clipboard-document-check" class="w-5 h-5" />
+          </button>
+
+          <button
+            phx-click="test_hitl_ui"
+            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
+            type="button"
+            title="Test HITL UI"
+          >
+            <.icon name="hero-shield-check" class="w-5 h-5" />
           </button>
         </div>
       </header>
@@ -326,6 +338,10 @@ defmodule AgentsDemoWeb.ChatComponents do
               </div>
             <% end %>
           </div>
+
+          <%= if @agent_status == :interrupted && @pending_tools != [] do %>
+            <.tool_approval_prompt pending_tools={@pending_tools} test_mode={@hitl_test_mode} />
+          <% end %>
         </div>
       </div>
 
@@ -580,6 +596,112 @@ defmodule AgentsDemoWeb.ChatComponents do
             type="button"
           >
             Close
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  attr :pending_tools, :list, required: true
+  attr :test_mode, :boolean, default: false
+
+  # Component: Tool Approval Prompt
+  def tool_approval_prompt(assigns) do
+    pending_count = Enum.count(assigns.pending_tools)
+
+    # Only show the first tool, with a counter
+    assigns =
+      assigns
+      |> assign(:current_tool, List.first(assigns.pending_tools))
+      |> assign(:total_count, pending_count)
+      |> assign(:remaining_count, pending_count - 1)
+
+    ~H"""
+    <div class="px-6 py-4 border-t-2 border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20">
+      <div class="max-w-3xl mx-auto">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div class="flex items-center gap-3">
+            <.icon name="hero-shield-exclamation" class="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+            <h3 class="text-lg font-bold text-yellow-900 dark:text-yellow-100 m-0">
+              Human Approval Required
+            </h3>
+          </div>
+          <div class="flex items-center gap-2">
+            <%= if @remaining_count > 0 do %>
+              <span class="px-2 py-1 bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100 text-xs font-medium rounded">
+                +{@remaining_count} more
+              </span>
+            <% end %>
+            <%= if @test_mode do %>
+              <span class="px-3 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-bold rounded-full border border-blue-300 dark:border-blue-700">
+                🧪 TEST MODE
+              </span>
+            <% end %>
+          </div>
+        </div>
+
+        <p class="text-sm text-yellow-800 dark:text-yellow-200 mb-4">
+          <%= if @test_mode do %>
+            <strong>Test Mode:</strong> The agent wants to execute this tool. This is a mock request for UI testing - clicking approve/reject will only update the display.
+          <% else %>
+            The agent wants to execute this tool. Please review and approve or reject this action:
+          <% end %>
+        </p>
+
+        <%!-- Show only the first tool (index 0) --%>
+        <%= if @current_tool do %>
+          <.tool_approval_item tool={@current_tool} index={0} />
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  attr :tool, :map, required: true
+  attr :index, :integer, required: true
+
+  # Component: Individual Tool Approval Item
+  def tool_approval_item(assigns) do
+    assigns = assign(assigns, :args_json, format_tool_arguments(assigns.tool.arguments))
+
+    ~H"""
+    <div class="bg-white dark:bg-gray-800 border-2 border-yellow-300 dark:border-yellow-700 rounded-lg p-4 shadow-sm">
+      <div class="flex flex-col gap-3">
+        <div class="flex items-center gap-2">
+          <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+          <span class="text-lg font-bold text-gray-900 dark:text-gray-100">
+            {@tool.name}
+          </span>
+        </div>
+
+        <%= if @args_json && @args_json != "{}" do %>
+          <details class="mt-1" open>
+            <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 mb-2">
+              Arguments
+            </summary>
+            <pre class="mt-2 p-3 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-800 dark:text-gray-200 overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono"><code>{@args_json}</code></pre>
+          </details>
+        <% end %>
+
+        <div class="flex items-center justify-end gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+          <button
+            phx-click="reject_tool"
+            phx-value-index={@index}
+            class="px-5 py-2.5 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border-none rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
+            type="button"
+          >
+            <.icon name="hero-x-mark" class="w-4 h-4 inline-block mr-1" />
+            Reject
+          </button>
+          <button
+            phx-click="approve_tool"
+            phx-value-index={@index}
+            class="px-5 py-2.5 bg-green-600 text-white border-none rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm"
+            type="button"
+          >
+            <.icon name="hero-check" class="w-4 h-4 inline-block mr-1" />
+            Approve
           </button>
         </div>
       </div>
