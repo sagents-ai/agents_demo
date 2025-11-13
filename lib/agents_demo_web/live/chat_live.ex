@@ -240,43 +240,15 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:status_changed, :completed, final_state}, socket) do
+  def handle_info({:status_changed, :completed, _final_state}, socket) do
     Logger.info("Agent completed execution")
 
-
-# TODO: The status_changed event should not be creating the assistant message. The llm_message callback should do that.
-
-# TODO: What is the message structure used in the messages stream? The
-# `handle_info({:status_changed, ...` is converting it to a bare map. Is that
-# what it's doing? It might be okay as it's actually gets closer to a separate
-# DB-backed version. However, the current state of this needs to be understood.
-
-
-    # Extract the last assistant message from the state
-    assistant_messages =
-      final_state.messages
-      |> Enum.reverse()
-      |> Enum.find(fn msg -> msg.role == :assistant end)
-
-    case assistant_messages do
-      %Message{content: content} when is_binary(content) ->
-        assistant_message = %{
-          id: generate_id(),
-          type: :assistant,
-          content: content,
-          timestamp: DateTime.utc_now()
-        }
-
-        {:noreply,
-         socket
-         |> assign(:loading, false)
-         |> assign_filesystem_files()
-         |> stream_insert(:messages, assistant_message)
-        }
-
-      _ ->
-        {:noreply, assign(socket, :loading, false)}
-    end
+    # Don't create messages here - they should be added via :llm_message and :tool_response handlers
+    {:noreply,
+     socket
+     |> assign(:loading, false)
+     |> assign_filesystem_files()
+    }
   end
 
   @impl true
@@ -334,17 +306,20 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:llm_token_usage, usage}, socket) do
-    # Optional: Display token usage stats
-    Logger.debug("Token usage: #{inspect(usage)}")
+  def handle_info({:tool_response, message}, socket) do
+    Logger.info("Tool response message received")
+
+    socket =
+      socket
+      |> finalize_streaming_message(message)
+
     {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:tool_response, message}, socket) do
-    # Optional: Display tool execution results
-    # This could be used to show "thinking" indicators
-    Logger.debug("Tool response: #{inspect(message.content)}")
+  def handle_info({:llm_token_usage, usage}, socket) do
+    # Optional: Display token usage stats
+    Logger.debug("Token usage: #{inspect(usage)}")
     {:noreply, socket}
   end
 

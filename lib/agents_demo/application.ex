@@ -67,7 +67,8 @@ defmodule AgentsDemo.Application do
       ChatAnthropic.new!(%{
         model: @claude_model,
         api_key: api_key,
-        temperature: 0.7
+        temperature: 0.7,
+        stream: true
       })
 
     # Create the Agent

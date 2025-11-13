@@ -453,8 +453,8 @@ defmodule AgentsDemoWeb.ChatComponents do
           Tool Result: {@tool_result.name}
         </span>
       </div>
-      <div class="pl-6 text-sm text-[var(--color-text-secondary)]">
-        <details open>
+      <div class="pl-6 text-[var(--color-text-secondary)]">
+        <details class="text-xs">
           <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
             Response
           </summary>
@@ -518,7 +518,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
       <div class="flex-1 min-w-0">
         <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-          {@content}
+          <.markdown text={@content} />
           <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
         </div>
       </div>
