@@ -300,6 +300,7 @@ defmodule AgentsDemoWeb.ChatComponents do
               class="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-6"
               id="messages-list"
               phx-update="stream"
+              phx-hook="MessagesList"
             >
               <div :for={{id, message} <- @streams.messages} id={id}>
                 <.message message={message} />

@@ -92,7 +92,8 @@ defmodule AgentsDemoWeb.ChatLive do
            |> assign(:input, "")
            |> assign(:loading, true)
            |> assign(:has_messages, true)
-           |> stream_insert(:messages, user_message)}
+           |> stream_insert(:messages, user_message)
+           |> push_event("scroll-to-bottom", %{})}
 
         {:error, reason} ->
           Logger.error("Failed to execute agent: #{inspect(reason)}")
@@ -301,17 +302,7 @@ defmodule AgentsDemoWeb.ChatLive do
       socket
       |> finalize_streaming_message(message)
       |> assign(:loading, false)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:tool_response, message}, socket) do
-    Logger.info("Tool response message received")
-
-    socket =
-      socket
-      |> finalize_streaming_message(message)
+      |> push_event("scroll-to-bottom", %{})
 
     {:noreply, socket}
   end
