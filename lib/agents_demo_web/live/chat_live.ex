@@ -111,6 +111,35 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
+  def handle_event("cancel_agent", _params, socket) do
+    Logger.info("User requested to cancel agent execution")
+
+    case AgentServer.cancel(@agent_id) do
+      :ok ->
+        # Create a cancellation message to display in the chat
+        cancellation_message = %{
+          id: generate_id(),
+          type: :assistant,
+          content: "_Action was cancelled by user._",
+          timestamp: DateTime.utc_now()
+        }
+
+        {:noreply,
+         socket
+         |> assign(:loading, false)
+         |> assign(:agent_status, :completed)
+         |> assign(:streaming_delta, nil)
+         |> stream_insert(:messages, cancellation_message)
+         |> push_event("scroll-to-bottom", %{})
+         |> put_flash(:info, "Agent execution cancelled")}
+
+      {:error, reason} ->
+        Logger.error("Failed to cancel agent: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to cancel agent: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
   def handle_event("update_input", %{"message" => message}, socket) do
     {:noreply, assign(socket, :input, message)}
   end
