@@ -284,43 +284,48 @@ defmodule AgentsDemoWeb.ChatComponents do
         <% end %>
 
         <div class="flex flex-1 flex-col overflow-hidden relative">
-          <%= if not @has_messages do %>
-            <div class="flex flex-col items-center justify-center h-full px-12 py-12 text-center">
-              <.icon
-                name="hero-chat-bubble-left-right"
-                class="w-16 h-16 text-[var(--color-text-tertiary)] mb-6"
-              />
-              <h2 class="mb-2 text-[var(--color-text-primary)]">Start a Conversation</h2>
-              <p class="text-[var(--color-text-secondary)] m-0">Ask me anything to get started</p>
-            </div>
-          <% end %>
-
-          <%= if @has_messages do %>
-            <div
-              class="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-6"
-              id="messages-list"
-              phx-update="stream"
-              phx-hook="MessagesList"
-            >
-              <div :for={{id, message} <- @streams.messages} id={id}>
-                <.message message={message} />
+          <div
+            id="chat-messages-container"
+            class="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-6"
+            phx-hook="ChatContainer"
+          >
+            <%= if not @has_messages do %>
+              <div class="flex flex-col items-center justify-center h-full text-center">
+                <.icon
+                  name="hero-chat-bubble-left-right"
+                  class="w-16 h-16 text-[var(--color-text-tertiary)] mb-6"
+                />
+                <h2 class="mb-2 text-[var(--color-text-primary)]">Start a Conversation</h2>
+                <p class="text-[var(--color-text-secondary)] m-0">Ask me anything to get started</p>
               </div>
-            </div>
-          <% end %>
+            <% end %>
 
-          <%= if @streaming_delta != nil do %>
-            <div class="px-6 py-4">
-              <.streaming_message streaming_delta={@streaming_delta} />
-            </div>
-          <% end %>
-
-          <%= if @loading && @streaming_delta == nil do %>
-            <div class="flex items-center gap-2 px-6 py-4 text-[var(--color-text-secondary)]">
-              <div class="w-4 h-4 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin">
+            <%= if @has_messages do %>
+              <div
+                id="messages-list"
+                phx-update="stream"
+                class="flex flex-col gap-6"
+              >
+                <div :for={{id, message} <- @streams.messages} id={id}>
+                  <.message message={message} />
+                </div>
               </div>
-              <span>Thinking...</span>
-            </div>
-          <% end %>
+            <% end %>
+
+            <%= if @streaming_delta != nil do %>
+              <div>
+                <.streaming_message streaming_delta={@streaming_delta} />
+              </div>
+            <% end %>
+
+            <%= if @loading && @streaming_delta == nil do %>
+              <div class="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                <div class="w-4 h-4 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin">
+                </div>
+                <span>Thinking...</span>
+              </div>
+            <% end %>
+          </div>
         </div>
       </div>
 

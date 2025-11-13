@@ -27,7 +27,7 @@ import topbar from "../vendor/topbar"
 
 // Custom hooks
 const Hooks = {
-  MessagesList: {
+  ChatContainer: {
     mounted() {
       this.handleEvent("scroll-to-bottom", () => {
         this.el.scrollTop = this.el.scrollHeight

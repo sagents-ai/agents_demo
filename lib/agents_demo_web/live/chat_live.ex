@@ -288,7 +288,10 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_info({:llm_deltas, deltas}, socket) do
     # Append deltas to current streaming message
     # deltas is a list, so we need to iterate through them
-    socket = update_streaming_message(socket, deltas)
+    socket =
+      socket
+      |> update_streaming_message(deltas)
+      |> push_event("scroll-to-bottom", %{})
 
     {:noreply, socket}
   end
