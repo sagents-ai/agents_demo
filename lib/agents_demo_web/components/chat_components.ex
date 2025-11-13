@@ -682,7 +682,7 @@ defmodule AgentsDemoWeb.ChatComponents do
         <div class="flex items-center gap-2">
           <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
           <span class="text-lg font-bold text-gray-900 dark:text-gray-100">
-            {@tool.name}
+            {@tool.tool_name}
           </span>
         </div>
 
