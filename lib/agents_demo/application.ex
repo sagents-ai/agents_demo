@@ -12,7 +12,6 @@ defmodule AgentsDemo.Application do
   alias LangChain.Agents.FileSystem.FileSystemConfig
   alias LangChain.Agents.FileSystem.Persistence.Disk
 
-
   # New anthropic models to use
   @claude_model "claude-sonnet-4-5-20250929"
   # @bedrock_claude_model "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -74,14 +73,16 @@ defmodule AgentsDemo.Application do
     # Create the Agent
     agent =
       Agent.new!(
-        agent_id: "demo-agent-001",
-        model: model,
-        system_prompt: """
-        You are a helpful AI assistant with access to a persistent memory system.
-        You can read, write, and manage files in the /Memories directory.
-        Be friendly, helpful, and demonstrate your file system capabilities when appropriate.
-        """,
-        name: "Demo Agent",
+        %{
+          agent_id: "demo-agent-001",
+          model: model,
+          system_prompt: """
+          You are a helpful AI assistant with access to a persistent memory system.
+          You can read, write, and manage files in the /Memories directory.
+          Be friendly, helpful, and demonstrate your file system capabilities when appropriate.
+          """,
+          name: "Demo Agent"
+        },
         # Adding "Human In The Loop" (hitl) control for writing and deleting
         # files
         interrupt_on: %{
