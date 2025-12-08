@@ -7,37 +7,67 @@ defmodule AgentsDemoWeb.UserLive.Registration do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto max-w-sm">
-        <div class="text-center">
-          <.header>
-            Register for an account
-            <:subtitle>
-              Already registered?
-              <.link navigate={~p"/users/log-in"} class="font-semibold text-brand hover:underline">
-                Log in
-              </.link>
-              to your account now.
-            </:subtitle>
-          </.header>
+    <div class="flex h-screen w-screen bg-[var(--color-background)] overflow-hidden">
+      <div class="flex flex-1 items-center justify-center p-8">
+        <div class="max-w-md w-full">
+          <div class="mb-8 flex justify-center">
+            <.link navigate={~p"/"} class="no-underline">
+              <div class="w-16 h-16 rounded-full bg-[var(--color-primary)] flex items-center justify-center">
+                <.icon name="hero-chat-bubble-left-right" class="w-10 h-10 text-white" />
+              </div>
+            </.link>
+          </div>
+
+          <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg">
+            <div class="text-center mb-6">
+              <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2">
+                Register for an Account
+              </h1>
+              <p class="text-[var(--color-text-secondary)]">
+                Already registered?
+                <.link
+                  navigate={~p"/users/log-in"}
+                  class="font-semibold text-[var(--color-primary)] hover:underline no-underline"
+                >
+                  Log in
+                </.link>
+                to your account now.
+              </p>
+            </div>
+
+            <.form
+              for={@form}
+              id="registration_form"
+              phx-submit="save"
+              phx-change="validate"
+              class="space-y-4"
+            >
+              <.input
+                field={@form[:email]}
+                type="email"
+                label="Email"
+                autocomplete="username"
+                required
+                phx-mounted={JS.focus()}
+              />
+
+              <.button phx-disable-with="Creating account..." class="btn btn-primary w-full">
+                Create an account
+              </.button>
+            </.form>
+          </div>
+
+          <div class="mt-6 text-center">
+            <.link
+              navigate={~p"/"}
+              class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] no-underline"
+            >
+              ← Back to home
+            </.link>
+          </div>
         </div>
-
-        <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate">
-          <.input
-            field={@form[:email]}
-            type="email"
-            label="Email"
-            autocomplete="username"
-            required
-            phx-mounted={JS.focus()}
-          />
-
-          <.button phx-disable-with="Creating account..." class="btn btn-primary w-full">
-            Create an account
-          </.button>
-        </.form>
       </div>
-    </Layouts.app>
+    </div>
     """
   end
 

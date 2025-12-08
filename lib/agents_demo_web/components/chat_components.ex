@@ -1,5 +1,10 @@
 defmodule AgentsDemoWeb.ChatComponents do
   use Phoenix.Component
+  use Phoenix.VerifiedRoutes,
+        endpoint: AgentsDemoWeb.Endpoint,
+        router: AgentsDemoWeb.Router,
+        statics: AgentsDemoWeb.static_paths()
+
   import AgentsDemoWeb.CoreComponents
 
   alias LangChain.MessageDelta
@@ -225,6 +230,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :input, :string, doc: "The user input being drafted for a new message"
   attr :agent_status, :atom, default: :idle
   attr :pending_tools, :list, default: []
+  attr :current_scope, :any, default: nil
 
   # Component: Chat Interface
   def chat_interface(assigns) do
@@ -236,33 +242,58 @@ defmodule AgentsDemoWeb.ChatComponents do
           <h1 class="text-2xl font-semibold m-0">Agents Demo</h1>
         </div>
 
-        <div class="flex items-center gap-2">
-          <button
-            phx-click="toggle_thread_history"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="Thread History"
-          >
-            <.icon name="hero-clock" class="w-5 h-5" />
-          </button>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <button
+              phx-click="toggle_thread_history"
+              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
+              type="button"
+              title="Thread History"
+            >
+              <.icon name="hero-clock" class="w-5 h-5" />
+            </button>
 
-          <button
-            phx-click="new_thread"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="New Thread"
-          >
-            <.icon name="hero-document-plus" class="w-5 h-5" />
-          </button>
+            <button
+              phx-click="new_thread"
+              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
+              type="button"
+              title="New Thread"
+            >
+              <.icon name="hero-document-plus" class="w-5 h-5" />
+            </button>
 
-          <button
-            phx-click="setup_demo_data"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="Test TODOs"
-          >
-            <.icon name="hero-clipboard-document-check" class="w-5 h-5" />
-          </button>
+            <button
+              phx-click="setup_demo_data"
+              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
+              type="button"
+              title="Test TODOs"
+            >
+              <.icon name="hero-clipboard-document-check" class="w-5 h-5" />
+            </button>
+          </div>
+
+          <%= if @current_scope do %>
+            <div class="flex items-center gap-2 pl-4 border-l border-[var(--color-border)]">
+              <span class="text-xs text-[var(--color-text-secondary)] px-2">
+                {@current_scope.user.email}
+              </span>
+              <.link
+                href={~p"/users/settings"}
+                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors no-underline inline-flex items-center justify-center"
+                title="Settings"
+              >
+                <.icon name="hero-cog-6-tooth" class="w-5 h-5" />
+              </.link>
+              <.link
+                href={~p"/users/log-out"}
+                method="delete"
+                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors no-underline inline-flex items-center justify-center"
+                title="Log out"
+              >
+                <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
+              </.link>
+            </div>
+          <% end %>
         </div>
       </header>
 

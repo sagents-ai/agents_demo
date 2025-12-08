@@ -8,61 +8,101 @@ defmodule AgentsDemoWeb.UserLive.Settings do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="text-center">
-        <.header>
-          Account Settings
-          <:subtitle>Manage your account email address and password settings</:subtitle>
-        </.header>
+    <div class="flex h-screen w-screen bg-[var(--color-background)] overflow-hidden">
+      <div class="flex flex-1 items-start justify-center p-8 overflow-y-auto">
+        <div class="max-w-2xl w-full py-8">
+          <div class="mb-8 flex justify-center">
+            <.link navigate={~p"/chat"} class="no-underline">
+              <div class="w-16 h-16 rounded-full bg-[var(--color-primary)] flex items-center justify-center">
+                <.icon name="hero-chat-bubble-left-right" class="w-10 h-10 text-white" />
+              </div>
+            </.link>
+          </div>
+
+          <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-[var(--color-text-primary)] mb-2">
+              Account Settings
+            </h1>
+            <p class="text-[var(--color-text-secondary)]">
+              Manage your account email address and password settings
+            </p>
+          </div>
+
+          <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg mb-6">
+            <h2 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
+              Email Address
+            </h2>
+            <.form
+              for={@email_form}
+              id="email_form"
+              phx-submit="update_email"
+              phx-change="validate_email"
+              class="space-y-4"
+            >
+              <.input
+                field={@email_form[:email]}
+                type="email"
+                label="Email"
+                autocomplete="username"
+                required
+              />
+              <.button variant="primary" phx-disable-with="Changing...">
+                Change Email
+              </.button>
+            </.form>
+          </div>
+
+          <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg">
+            <h2 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
+              Password
+            </h2>
+            <.form
+              for={@password_form}
+              id="password_form"
+              action={~p"/users/update-password"}
+              method="post"
+              phx-change="validate_password"
+              phx-submit="update_password"
+              phx-trigger-action={@trigger_submit}
+              class="space-y-4"
+            >
+              <input
+                name={@password_form[:email].name}
+                type="hidden"
+                id="hidden_user_email"
+                autocomplete="username"
+                value={@current_email}
+              />
+              <.input
+                field={@password_form[:password]}
+                type="password"
+                label="New password"
+                autocomplete="new-password"
+                required
+              />
+              <.input
+                field={@password_form[:password_confirmation]}
+                type="password"
+                label="Confirm new password"
+                autocomplete="new-password"
+              />
+              <.button variant="primary" phx-disable-with="Saving...">
+                Save Password
+              </.button>
+            </.form>
+          </div>
+
+          <div class="mt-6 text-center">
+            <.link
+              navigate={~p"/chat"}
+              class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] no-underline"
+            >
+              ← Back to chat
+            </.link>
+          </div>
+        </div>
       </div>
-
-      <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
-        <.input
-          field={@email_form[:email]}
-          type="email"
-          label="Email"
-          autocomplete="username"
-          required
-        />
-        <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
-      </.form>
-
-      <div class="divider" />
-
-      <.form
-        for={@password_form}
-        id="password_form"
-        action={~p"/users/update-password"}
-        method="post"
-        phx-change="validate_password"
-        phx-submit="update_password"
-        phx-trigger-action={@trigger_submit}
-      >
-        <input
-          name={@password_form[:email].name}
-          type="hidden"
-          id="hidden_user_email"
-          autocomplete="username"
-          value={@current_email}
-        />
-        <.input
-          field={@password_form[:password]}
-          type="password"
-          label="New password"
-          autocomplete="new-password"
-          required
-        />
-        <.input
-          field={@password_form[:password_confirmation]}
-          type="password"
-          label="Confirm new password"
-          autocomplete="new-password"
-        />
-        <.button variant="primary" phx-disable-with="Saving...">
-          Save Password
-        </.button>
-      </.form>
-    </Layouts.app>
+    </div>
     """
   end
 

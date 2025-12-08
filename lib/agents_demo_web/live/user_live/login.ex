@@ -6,89 +6,128 @@ defmodule AgentsDemoWeb.UserLive.Login do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto max-w-sm space-y-4">
-        <div class="text-center">
-          <.header>
-            <p>Log in</p>
-            <:subtitle>
-              <%= if @current_scope do %>
-                You need to reauthenticate to perform sensitive actions on your account.
-              <% else %>
-                Don't have an account? <.link
-                  navigate={~p"/users/register"}
-                  class="font-semibold text-brand hover:underline"
-                  phx-no-format
-                >Sign up</.link> for an account now.
-              <% end %>
-            </:subtitle>
-          </.header>
-        </div>
+    <div class="flex h-screen w-screen bg-[var(--color-background)] overflow-hidden">
+      <div class="flex flex-1 items-center justify-center p-8">
+        <div class="max-w-md w-full">
+          <div class="mb-8 flex justify-center">
+            <.link navigate={~p"/"} class="no-underline">
+              <div class="w-16 h-16 rounded-full bg-[var(--color-primary)] flex items-center justify-center">
+                <.icon name="hero-chat-bubble-left-right" class="w-10 h-10 text-white" />
+              </div>
+            </.link>
+          </div>
 
-        <div :if={local_mail_adapter?()} class="alert alert-info">
-          <.icon name="hero-information-circle" class="size-6 shrink-0" />
-          <div>
-            <p>You are running the local mail adapter.</p>
-            <p>
-              To see sent emails, visit <.link href="/dev/mailbox" class="underline">the mailbox page</.link>.
-            </p>
+          <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg">
+            <div class="text-center mb-6">
+              <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2">Log In</h1>
+              <p class="text-[var(--color-text-secondary)]">
+                <%= if @current_scope do %>
+                  You need to reauthenticate to perform sensitive actions on your account.
+                <% else %>
+                  Don't have an account?
+                  <.link
+                    navigate={~p"/users/register"}
+                    class="font-semibold text-[var(--color-primary)] hover:underline no-underline"
+                  >
+                    Sign up
+                  </.link>
+                  for an account now.
+                <% end %>
+              </p>
+            </div>
+
+            <div
+              :if={local_mail_adapter?()}
+              class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg"
+            >
+              <div class="flex gap-3">
+                <.icon name="hero-information-circle" class="w-6 h-6 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <div class="text-sm text-blue-900 dark:text-blue-100">
+                  <p class="font-semibold mb-1">Local mail adapter active</p>
+                  <p>
+                    To see sent emails, visit
+                    <.link href="/dev/mailbox" class="underline font-medium">the mailbox page</.link>.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <.form
+              :let={f}
+              for={@form}
+              id="login_form_magic"
+              action={~p"/users/log-in"}
+              phx-submit="submit_magic"
+              class="space-y-4"
+            >
+              <.input
+                readonly={!!@current_scope}
+                field={f[:email]}
+                type="email"
+                label="Email"
+                autocomplete="username"
+                required
+                phx-mounted={JS.focus()}
+              />
+              <.button class="btn btn-primary w-full">
+                Log in with email <span aria-hidden="true">→</span>
+              </.button>
+            </.form>
+
+            <div class="relative my-6">
+              <div class="absolute inset-0 flex items-center">
+                <div class="w-full border-t border-[var(--color-border)]"></div>
+              </div>
+              <div class="relative flex justify-center text-sm">
+                <span class="px-4 bg-[var(--color-surface)] text-[var(--color-text-secondary)]">
+                  or
+                </span>
+              </div>
+            </div>
+
+            <.form
+              :let={f}
+              for={@form}
+              id="login_form_password"
+              action={~p"/users/log-in"}
+              phx-submit="submit_password"
+              phx-trigger-action={@trigger_submit}
+              class="space-y-4"
+            >
+              <.input
+                readonly={!!@current_scope}
+                field={f[:email]}
+                type="email"
+                label="Email"
+                autocomplete="username"
+                required
+              />
+              <.input
+                field={@form[:password]}
+                type="password"
+                label="Password"
+                autocomplete="current-password"
+              />
+              <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
+                Log in and stay logged in <span aria-hidden="true">→</span>
+              </.button>
+              <.button class="btn btn-primary btn-soft w-full mt-2">
+                Log in only this time
+              </.button>
+            </.form>
+          </div>
+
+          <div class="mt-6 text-center">
+            <.link
+              navigate={~p"/"}
+              class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] no-underline"
+            >
+              ← Back to home
+            </.link>
           </div>
         </div>
-
-        <.form
-          :let={f}
-          for={@form}
-          id="login_form_magic"
-          action={~p"/users/log-in"}
-          phx-submit="submit_magic"
-        >
-          <.input
-            readonly={!!@current_scope}
-            field={f[:email]}
-            type="email"
-            label="Email"
-            autocomplete="username"
-            required
-            phx-mounted={JS.focus()}
-          />
-          <.button class="btn btn-primary w-full">
-            Log in with email <span aria-hidden="true">→</span>
-          </.button>
-        </.form>
-
-        <div class="divider">or</div>
-
-        <.form
-          :let={f}
-          for={@form}
-          id="login_form_password"
-          action={~p"/users/log-in"}
-          phx-submit="submit_password"
-          phx-trigger-action={@trigger_submit}
-        >
-          <.input
-            readonly={!!@current_scope}
-            field={f[:email]}
-            type="email"
-            label="Email"
-            autocomplete="username"
-            required
-          />
-          <.input
-            field={@form[:password]}
-            type="password"
-            label="Password"
-            autocomplete="current-password"
-          />
-          <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
-            Log in and stay logged in <span aria-hidden="true">→</span>
-          </.button>
-          <.button class="btn btn-primary btn-soft w-full mt-2">
-            Log in only this time
-          </.button>
-        </.form>
       </div>
-    </Layouts.app>
+    </div>
     """
   end
 

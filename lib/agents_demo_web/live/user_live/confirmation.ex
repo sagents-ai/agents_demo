@@ -6,69 +6,100 @@ defmodule AgentsDemoWeb.UserLive.Confirmation do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto max-w-sm">
-        <div class="text-center">
-          <.header>Welcome {@user.email}</.header>
-        </div>
+    <div class="flex h-screen w-screen bg-[var(--color-background)] overflow-hidden">
+      <div class="flex flex-1 items-center justify-center p-8">
+        <div class="max-w-md w-full">
+          <div class="mb-8 flex justify-center">
+            <.link navigate={~p"/"} class="no-underline">
+              <div class="w-16 h-16 rounded-full bg-[var(--color-primary)] flex items-center justify-center">
+                <.icon name="hero-chat-bubble-left-right" class="w-10 h-10 text-white" />
+              </div>
+            </.link>
+          </div>
 
-        <.form
-          :if={!@user.confirmed_at}
-          for={@form}
-          id="confirmation_form"
-          phx-mounted={JS.focus_first()}
-          phx-submit="submit"
-          action={~p"/users/log-in?_action=confirmed"}
-          phx-trigger-action={@trigger_submit}
-        >
-          <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
-          <.button
-            name={@form[:remember_me].name}
-            value="true"
-            phx-disable-with="Confirming..."
-            class="btn btn-primary w-full"
-          >
-            Confirm and stay logged in
-          </.button>
-          <.button phx-disable-with="Confirming..." class="btn btn-primary btn-soft w-full mt-2">
-            Confirm and log in only this time
-          </.button>
-        </.form>
+          <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg">
+            <div class="text-center mb-6">
+              <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2">
+                Welcome {@user.email}
+              </h1>
+            </div>
 
-        <.form
-          :if={@user.confirmed_at}
-          for={@form}
-          id="login_form"
-          phx-submit="submit"
-          phx-mounted={JS.focus_first()}
-          action={~p"/users/log-in"}
-          phx-trigger-action={@trigger_submit}
-        >
-          <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
-          <%= if @current_scope do %>
-            <.button phx-disable-with="Logging in..." class="btn btn-primary w-full">
-              Log in
-            </.button>
-          <% else %>
-            <.button
-              name={@form[:remember_me].name}
-              value="true"
-              phx-disable-with="Logging in..."
-              class="btn btn-primary w-full"
+            <.form
+              :if={!@user.confirmed_at}
+              for={@form}
+              id="confirmation_form"
+              phx-mounted={JS.focus_first()}
+              phx-submit="submit"
+              action={~p"/users/log-in?_action=confirmed"}
+              phx-trigger-action={@trigger_submit}
+              class="space-y-3"
             >
-              Keep me logged in on this device
-            </.button>
-            <.button phx-disable-with="Logging in..." class="btn btn-primary btn-soft w-full mt-2">
-              Log me in only this time
-            </.button>
-          <% end %>
-        </.form>
+              <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
+              <.button
+                name={@form[:remember_me].name}
+                value="true"
+                phx-disable-with="Confirming..."
+                class="btn btn-primary w-full"
+              >
+                Confirm and stay logged in
+              </.button>
+              <.button phx-disable-with="Confirming..." class="btn btn-primary btn-soft w-full">
+                Confirm and log in only this time
+              </.button>
+            </.form>
 
-        <p :if={!@user.confirmed_at} class="alert alert-outline mt-8">
-          Tip: If you prefer passwords, you can enable them in the user settings.
-        </p>
+            <.form
+              :if={@user.confirmed_at}
+              for={@form}
+              id="login_form"
+              phx-submit="submit"
+              phx-mounted={JS.focus_first()}
+              action={~p"/users/log-in"}
+              phx-trigger-action={@trigger_submit}
+              class="space-y-3"
+            >
+              <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
+              <%= if @current_scope do %>
+                <.button phx-disable-with="Logging in..." class="btn btn-primary w-full">
+                  Log in
+                </.button>
+              <% else %>
+                <.button
+                  name={@form[:remember_me].name}
+                  value="true"
+                  phx-disable-with="Logging in..."
+                  class="btn btn-primary w-full"
+                >
+                  Keep me logged in on this device
+                </.button>
+                <.button phx-disable-with="Logging in..." class="btn btn-primary btn-soft w-full">
+                  Log me in only this time
+                </.button>
+              <% end %>
+            </.form>
+
+            <div
+              :if={!@user.confirmed_at}
+              class="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg"
+            >
+              <p class="text-sm text-blue-900 dark:text-blue-100 m-0">
+                <strong>Tip:</strong>
+                If you prefer passwords, you can enable them in the user settings.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 text-center">
+            <.link
+              navigate={~p"/"}
+              class="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] no-underline"
+            >
+              ← Back to home
+            </.link>
+          </div>
+        </div>
       </div>
-    </Layouts.app>
+    </div>
     """
   end
 
