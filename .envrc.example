@@ -1,0 +1,13 @@
+# AgentsDemo Environment Variables
+#
+# Copy this file to .envrc and fill in your values:
+#   cp .envrc.example .envrc
+#
+# Then load it with direnv or source it manually:
+#   source .envrc
+
+# Anthropic API Key
+# Get your API key from: https://console.anthropic.com/
+export ANTHROPIC_API_KEY="your-api-key-here"
+
+
