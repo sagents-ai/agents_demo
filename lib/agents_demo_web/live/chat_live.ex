@@ -49,8 +49,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:streaming_delta, nil)
      |> assign(:agent_status, :idle)
      |> assign(:pending_tools, [])
-     |> assign(:interrupt_data, nil)
-     |> assign(:hitl_test_mode, false)}
+     |> assign(:interrupt_data, nil)}
   end
 
   @impl true
@@ -272,55 +271,27 @@ defmodule AgentsDemoWeb.ChatLive do
     index = String.to_integer(index_str)
     pending_tools = socket.assigns.pending_tools
 
-    #TODO: REMOVE THIS WHEN READY
+    # Real mode: approve just this one tool
+    decisions = [%{type: :approve}]
 
-    # In test mode, just remove the approved tool from the list
-    if socket.assigns.hitl_test_mode do
-      Logger.info("TEST MODE: Approving tool at index #{index}")
+    Logger.info("Approving tool at index #{index}")
+    Logger.debug("Decision: #{inspect(decisions)}")
 
-      # Remove the approved tool from pending list
-      remaining_tools = List.delete_at(pending_tools, index)
+    # Resume the agent with the decision for just this tool
+    case AgentServer.resume(@agent_id, decisions) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:agent_status, :running)
+         |> assign(:loading, true)
+         |> assign(:pending_tools, [])
+         |> assign(:interrupt_data, nil)
+         |> put_flash(:info, "Tool approved - agent resuming")}
 
-      socket =
-        socket
-        |> assign(:pending_tools, remaining_tools)
-        |> put_flash(:info, "✓ Tool approved (test mode - not actually executed)")
-
-      # If no more tools, clear the interrupt state
-      socket =
-        if remaining_tools == [] do
-          socket
-          |> assign(:agent_status, :idle)
-          |> assign(:hitl_test_mode, false)
-          |> put_flash(:info, "All tools approved (test mode)")
-        else
-          socket
-        end
-
-      {:noreply, socket}
-    else
-      # Real mode: approve just this one tool
-      decisions = [%{type: :approve}]
-
-      Logger.info("Approving tool at index #{index}")
-      Logger.debug("Decision: #{inspect(decisions)}")
-
-      # Resume the agent with the decision for just this tool
-      case AgentServer.resume(@agent_id, decisions) do
-        :ok ->
-          {:noreply,
-           socket
-           |> assign(:agent_status, :running)
-           |> assign(:loading, true)
-           |> assign(:pending_tools, [])
-           |> assign(:interrupt_data, nil)
-           |> put_flash(:info, "Tool approved - agent resuming")}
-
-        {:error, reason} ->
-          Logger.error("Failed to resume agent: #{inspect(reason)}")
-          error_msg = "Failed to resume agent: #{inspect(reason)}"
-          {:noreply, put_flash(socket, :error, error_msg)}
-      end
+      {:error, reason} ->
+        Logger.error("Failed to resume agent: #{inspect(reason)}")
+        error_msg = "Failed to resume agent: #{inspect(reason)}"
+        {:noreply, put_flash(socket, :error, error_msg)}
     end
   end
 
@@ -329,92 +300,28 @@ defmodule AgentsDemoWeb.ChatLive do
     index = String.to_integer(index_str)
     pending_tools = socket.assigns.pending_tools
 
-    #TODO: REMOVE THE TEST MODE PART WHEN READY
+    # Real mode: reject just this one tool
+    decisions = [%{type: :reject}]
 
-    # In test mode, just remove the rejected tool from the list
-    if socket.assigns.hitl_test_mode do
-      Logger.info("TEST MODE: Rejecting tool at index #{index}")
+    Logger.info("Rejecting tool at index #{index}")
+    Logger.debug("Decision: #{inspect(decisions)}")
 
-      # Remove the rejected tool from pending list
-      remaining_tools = List.delete_at(pending_tools, index)
+    # Resume the agent with the decision for just this tool
+    case AgentServer.resume(@agent_id, decisions) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:agent_status, :running)
+         |> assign(:loading, true)
+         |> assign(:pending_tools, [])
+         |> assign(:interrupt_data, nil)
+         |> put_flash(:info, "Tool rejected - agent resuming")}
 
-      socket =
-        socket
-        |> assign(:pending_tools, remaining_tools)
-        |> put_flash(:warning, "✗ Tool rejected (test mode)")
-
-      # If no more tools, clear the interrupt state
-      socket =
-        if remaining_tools == [] do
-          socket
-          |> assign(:agent_status, :idle)
-          |> assign(:hitl_test_mode, false)
-          |> put_flash(:info, "All tools processed (test mode)")
-        else
-          socket
-        end
-
-      {:noreply, socket}
-    else
-      # Real mode: reject just this one tool
-      decisions = [%{type: :reject}]
-
-      Logger.info("Rejecting tool at index #{index}")
-      Logger.debug("Decision: #{inspect(decisions)}")
-
-      # Resume the agent with the decision for just this tool
-      case AgentServer.resume(@agent_id, decisions) do
-        :ok ->
-          {:noreply,
-           socket
-           |> assign(:agent_status, :running)
-           |> assign(:loading, true)
-           |> assign(:pending_tools, [])
-           |> assign(:interrupt_data, nil)
-           |> put_flash(:info, "Tool rejected - agent resuming")}
-
-        {:error, reason} ->
-          Logger.error("Failed to resume agent: #{inspect(reason)}")
-          error_msg = "Failed to resume agent: #{inspect(reason)}"
-          {:noreply, put_flash(socket, :error, error_msg)}
-      end
+      {:error, reason} ->
+        Logger.error("Failed to resume agent: #{inspect(reason)}")
+        error_msg = "Failed to resume agent: #{inspect(reason)}"
+        {:noreply, put_flash(socket, :error, error_msg)}
     end
-  end
-
-  @impl true
-  def handle_event("test_hitl_ui", _params, socket) do
-    # Create mock tool approval requests for UI testing
-    mock_tools = [
-      %{
-        name: "write_file",
-        arguments: %{
-          "path" => "/Memories/test_file.txt",
-          "content" => "This is a test file created by the agent."
-        }
-      },
-      %{
-        name: "delete_file",
-        arguments: %{
-          "path" => "/Memories/old_file.txt"
-        }
-      },
-      %{
-        name: "search_web",
-        arguments: %{
-          "query" => "best practices for Elixir testing"
-        }
-      }
-    ]
-
-    Logger.info("Triggering mock HITL UI for testing")
-
-    {:noreply,
-     socket
-     |> assign(:agent_status, :interrupted)
-     |> assign(:loading, false)
-     |> assign(:pending_tools, mock_tools)
-     |> assign(:hitl_test_mode, true)
-     |> put_flash(:info, "TEST MODE: Mock HITL UI - tools won't actually execute")}
   end
 
   @impl true
@@ -630,7 +537,6 @@ defmodule AgentsDemoWeb.ChatLive do
           streaming_delta={@streaming_delta}
           agent_status={@agent_status}
           pending_tools={@pending_tools}
-          hitl_test_mode={@hitl_test_mode}
         />
       </div>
 

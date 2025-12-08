@@ -225,7 +225,6 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :input, :string, doc: "The user input being drafted for a new message"
   attr :agent_status, :atom, default: :idle
   attr :pending_tools, :list, default: []
-  attr :hitl_test_mode, :boolean, default: false
 
   # Component: Chat Interface
   def chat_interface(assigns) do
@@ -263,15 +262,6 @@ defmodule AgentsDemoWeb.ChatComponents do
             title="Test TODOs"
           >
             <.icon name="hero-clipboard-document-check" class="w-5 h-5" />
-          </button>
-
-          <button
-            phx-click="test_hitl_ui"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="Test HITL UI"
-          >
-            <.icon name="hero-shield-check" class="w-5 h-5" />
           </button>
         </div>
       </header>
@@ -340,7 +330,7 @@ defmodule AgentsDemoWeb.ChatComponents do
           </div>
 
           <%= if @agent_status == :interrupted && @pending_tools != [] do %>
-            <.tool_approval_prompt pending_tools={@pending_tools} test_mode={@hitl_test_mode} />
+            <.tool_approval_prompt pending_tools={@pending_tools} />
           <% end %>
         </div>
       </div>
