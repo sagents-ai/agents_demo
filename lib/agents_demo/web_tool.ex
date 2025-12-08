@@ -6,7 +6,7 @@ defmodule AgentsDemo.WebTool do
   - Fetch webpages as markdown using an external Go binary
   - Search DuckDuckGo and extract structured results
 
-  Both functions interface with the `web-linux-amd64` Go binary located
+  Both functions interface with the `web` Go binary located
   in the project's priv directory.
   """
 
@@ -14,7 +14,7 @@ defmodule AgentsDemo.WebTool do
   @max_results 10
 
   defp web_binary_path do
-    Application.app_dir(:agents_demo, "priv/web-linux-amd64")
+    Application.app_dir(:agents_demo, "priv/web")
   end
 
   @doc """

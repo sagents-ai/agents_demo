@@ -11,6 +11,7 @@ defmodule AgentsDemo.Application do
   alias LangChain.Agents.AgentSupervisor
   alias LangChain.Agents.FileSystem.FileSystemConfig
   alias LangChain.Agents.FileSystem.Persistence.Disk
+  alias AgentsDemo.Middleware.WebToolMiddleware
 
   # New anthropic models to use
   @claude_model "claude-sonnet-4-5-20250929"
@@ -77,11 +78,17 @@ defmodule AgentsDemo.Application do
           agent_id: "demo-agent-001",
           model: model,
           system_prompt: """
-          You are a helpful AI assistant with access to a persistent memory system.
+          You are a helpful AI assistant with access to a persistent memory system and web search capabilities.
+
           You can read, write, and manage files in the /Memories directory.
-          Be friendly, helpful, and demonstrate your file system capabilities when appropriate.
+          You can search the web for current information using the web_lookup tool.
+
+          Be friendly, helpful, and demonstrate your capabilities when appropriate.
+          When users ask about current information, recent events, or facts that may have changed,
+          use the web_lookup tool to get accurate, up-to-date information.
           """,
-          name: "Demo Agent"
+          name: "Demo Agent",
+          middleware: [WebToolMiddleware]
         },
         # Adding "Human In The Loop" (hitl) control for writing and deleting
         # files
