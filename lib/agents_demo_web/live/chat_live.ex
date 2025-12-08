@@ -273,6 +273,8 @@ defmodule AgentsDemoWeb.ChatLive do
 
     # Real mode: approve just this one tool
     decisions = [%{type: :approve}]
+    # Remove the approved tool from pending list
+    remaining_tools = List.delete_at(pending_tools, index)
 
     Logger.info("Approving tool at index #{index}")
     Logger.debug("Decision: #{inspect(decisions)}")
@@ -284,7 +286,7 @@ defmodule AgentsDemoWeb.ChatLive do
          socket
          |> assign(:agent_status, :running)
          |> assign(:loading, true)
-         |> assign(:pending_tools, [])
+         |> assign(:pending_tools, remaining_tools)
          |> assign(:interrupt_data, nil)
          |> put_flash(:info, "Tool approved - agent resuming")}
 
@@ -302,6 +304,8 @@ defmodule AgentsDemoWeb.ChatLive do
 
     # Real mode: reject just this one tool
     decisions = [%{type: :reject}]
+    # Remove the approved tool from pending list
+    remaining_tools = List.delete_at(pending_tools, index)
 
     Logger.info("Rejecting tool at index #{index}")
     Logger.debug("Decision: #{inspect(decisions)}")
@@ -313,7 +317,7 @@ defmodule AgentsDemoWeb.ChatLive do
          socket
          |> assign(:agent_status, :running)
          |> assign(:loading, true)
-         |> assign(:pending_tools, [])
+         |> assign(:pending_tools, remaining_tools)
          |> assign(:interrupt_data, nil)
          |> put_flash(:info, "Tool rejected - agent resuming")}
 
@@ -537,6 +541,7 @@ defmodule AgentsDemoWeb.ChatLive do
           streaming_delta={@streaming_delta}
           agent_status={@agent_status}
           pending_tools={@pending_tools}
+          current_scope={@current_scope}
         />
       </div>
 
