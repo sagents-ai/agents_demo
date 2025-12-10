@@ -45,8 +45,7 @@ defmodule AgentsDemoWeb.WelcomeLive do
                 href={~p"/users/register"}
                 class="px-8 py-4 flex items-center bg-[var(--color-surface)] text-[var(--color-text-primary)] font-semibold rounded-lg border-2 border-[var(--color-border)] hover:border-[var(--color-primary)] transition-colors no-underline text-lg"
               >
-                <.icon name="hero-user-plus" class="w-5 h-5 inline-block mr-2" />
-                Register
+                <.icon name="hero-user-plus" class="w-5 h-5 inline-block mr-2" /> Register
               </.link>
             </div>
           </div>
@@ -66,7 +65,10 @@ defmodule AgentsDemoWeb.WelcomeLive do
 
             <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-6">
               <div class="w-12 h-12 rounded-lg bg-[var(--color-primary)]/10 flex items-center justify-center mb-4">
-                <.icon name="hero-clipboard-document-check" class="w-6 h-6 text-[var(--color-primary)]" />
+                <.icon
+                  name="hero-clipboard-document-check"
+                  class="w-6 h-6 text-[var(--color-primary)]"
+                />
               </div>
               <h3 class="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
                 Task Management

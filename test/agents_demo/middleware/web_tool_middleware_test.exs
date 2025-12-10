@@ -258,7 +258,8 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
       data = %{
         "source_title" => "Elixir Programming Language",
         "source_url" => "https://elixir-lang.org",
-        "information" => "Elixir is a dynamic, functional language for building scalable applications."
+        "information" =>
+          "Elixir is a dynamic, functional language for building scalable applications."
       }
 
       result = WebToolMiddleware.format_success_response(data)
@@ -324,13 +325,14 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
 
   describe "parse_and_validate_result/1" do
     test "parses and validates successful JSON response" do
-      json_result = Jason.encode!(%{
-        "status" => "success",
-        "source_title" => "Elixir Documentation",
-        "source_url" => "https://elixir-lang.org",
-        "information" => "Elixir is a dynamic language.",
-        "search_performed" => "Elixir programming"
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "success",
+          "source_title" => "Elixir Documentation",
+          "source_url" => "https://elixir-lang.org",
+          "information" => "Elixir is a dynamic language.",
+          "search_performed" => "Elixir programming"
+        })
 
       assert {:ok, formatted} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert is_binary(formatted)
@@ -354,83 +356,90 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
     end
 
     test "handles error status from subagent" do
-      json_result = Jason.encode!(%{
-        "status" => "error",
-        "source_title" => "",
-        "source_url" => "",
-        "information" => "Search returned no results",
-        "search_performed" => "nonexistent query"
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "error",
+          "source_title" => "",
+          "source_url" => "",
+          "information" => "Search returned no results",
+          "search_performed" => "nonexistent query"
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "Web lookup error: Search returned no results"
     end
 
     test "rejects response with missing status field" do
-      json_result = Jason.encode!(%{
-        "source_title" => "Title",
-        "source_url" => "https://example.com",
-        "information" => "Info"
-      })
+      json_result =
+        Jason.encode!(%{
+          "source_title" => "Title",
+          "source_url" => "https://example.com",
+          "information" => "Info"
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "Invalid response format: missing or invalid 'status' field"
     end
 
     test "rejects response with invalid status value" do
-      json_result = Jason.encode!(%{
-        "status" => "unknown",
-        "source_title" => "Title",
-        "source_url" => "https://example.com",
-        "information" => "Info"
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "unknown",
+          "source_title" => "Title",
+          "source_url" => "https://example.com",
+          "information" => "Info"
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "Invalid response format: missing or invalid 'status' field"
     end
 
     test "rejects success response with missing required fields" do
-      json_result = Jason.encode!(%{
-        "status" => "success",
-        "source_title" => "Title"
-        # Missing source_url and information
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "success",
+          "source_title" => "Title"
+          # Missing source_url and information
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "Missing required fields: source_title, source_url, information"
     end
 
     test "rejects success response with empty source_title" do
-      json_result = Jason.encode!(%{
-        "status" => "success",
-        "source_title" => "",
-        "source_url" => "https://example.com",
-        "information" => "Some info"
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "success",
+          "source_title" => "",
+          "source_url" => "https://example.com",
+          "information" => "Some info"
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "source_title cannot be empty"
     end
 
     test "rejects success response with empty source_url" do
-      json_result = Jason.encode!(%{
-        "status" => "success",
-        "source_title" => "Title",
-        "source_url" => "",
-        "information" => "Some info"
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "success",
+          "source_title" => "Title",
+          "source_url" => "",
+          "information" => "Some info"
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "source_url cannot be empty"
     end
 
     test "rejects success response with empty information" do
-      json_result = Jason.encode!(%{
-        "status" => "success",
-        "source_title" => "Title",
-        "source_url" => "https://example.com",
-        "information" => ""
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "success",
+          "source_title" => "Title",
+          "source_url" => "https://example.com",
+          "information" => ""
+        })
 
       assert {:error, reason} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert reason == "information cannot be empty"
@@ -632,12 +641,13 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
     test "parse_and_validate_result handles very long information" do
       long_info = String.duplicate("Long information text. ", 1000)
 
-      json_result = Jason.encode!(%{
-        "status" => "success",
-        "source_title" => "Long Content",
-        "source_url" => "https://example.com",
-        "information" => long_info
-      })
+      json_result =
+        Jason.encode!(%{
+          "status" => "success",
+          "source_title" => "Long Content",
+          "source_url" => "https://example.com",
+          "information" => long_info
+        })
 
       assert {:ok, formatted} = WebToolMiddleware.parse_and_validate_result(json_result)
       assert String.contains?(formatted, "Long Content")

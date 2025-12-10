@@ -396,7 +396,10 @@ defmodule AgentsDemo.WebToolTest do
     test "identifies lines with 10+ consecutive dashes" do
       assert WebTool.is_separator_line?("----------") == true
       assert WebTool.is_separator_line?("---------------------------------------------") == true
-      assert WebTool.is_separator_line?("---------------------------------------------------------------------------------------------------------------------------") == true
+
+      assert WebTool.is_separator_line?(
+               "---------------------------------------------------------------------------------------------------------------------------"
+             ) == true
     end
 
     test "rejects lines with fewer than 10 consecutive dashes" do
@@ -430,10 +433,11 @@ defmodule AgentsDemo.WebToolTest do
       ]
 
       result = WebTool.extract_bracketed_blocks(lines)
+
       assert result == [
-        "Result 1 ( https://example.com/1 )",
-        "Result 2 ( https://example.com/2 )"
-      ]
+               "Result 1 ( https://example.com/1 )",
+               "Result 2 ( https://example.com/2 )"
+             ]
     end
 
     test "filters out lines that don't match pattern within blocks" do
@@ -446,10 +450,11 @@ defmodule AgentsDemo.WebToolTest do
       ]
 
       result = WebTool.extract_bracketed_blocks(lines)
+
       assert result == [
-        "Result 1 ( https://example.com/1 )",
-        "Result 2 ( https://example.com/2 )"
-      ]
+               "Result 1 ( https://example.com/1 )",
+               "Result 2 ( https://example.com/2 )"
+             ]
     end
 
     test "handles multiple lines between separators" do

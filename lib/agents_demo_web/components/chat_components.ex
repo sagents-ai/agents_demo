@@ -1,9 +1,10 @@
 defmodule AgentsDemoWeb.ChatComponents do
   use Phoenix.Component
+
   use Phoenix.VerifiedRoutes,
-        endpoint: AgentsDemoWeb.Endpoint,
-        router: AgentsDemoWeb.Router,
-        statics: AgentsDemoWeb.static_paths()
+    endpoint: AgentsDemoWeb.Endpoint,
+    router: AgentsDemoWeb.Router,
+    statics: AgentsDemoWeb.static_paths()
 
   import AgentsDemoWeb.CoreComponents
 
@@ -654,7 +655,10 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class="max-w-3xl mx-auto">
         <div class="flex items-center justify-between gap-3 mb-3">
           <div class="flex items-center gap-3">
-            <.icon name="hero-shield-exclamation" class="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
+            <.icon
+              name="hero-shield-exclamation"
+              class="w-6 h-6 text-yellow-600 dark:text-yellow-400"
+            />
             <h3 class="text-lg font-bold text-yellow-900 dark:text-yellow-100 m-0">
               Human Approval Required
             </h3>
@@ -675,7 +679,8 @@ defmodule AgentsDemoWeb.ChatComponents do
 
         <p class="text-sm text-yellow-800 dark:text-yellow-200 mb-4">
           <%= if @test_mode do %>
-            <strong>Test Mode:</strong> The agent wants to execute this tool. This is a mock request for UI testing - clicking approve/reject will only update the display.
+            <strong>Test Mode:</strong>
+            The agent wants to execute this tool. This is a mock request for UI testing - clicking approve/reject will only update the display.
           <% else %>
             The agent wants to execute this tool. Please review and approve or reject this action:
           <% end %>
@@ -701,7 +706,10 @@ defmodule AgentsDemoWeb.ChatComponents do
     <div class="bg-white dark:bg-gray-800 border-2 border-yellow-300 dark:border-yellow-700 rounded-lg p-4 shadow-sm">
       <div class="flex flex-col gap-3">
         <div class="flex items-center gap-2">
-          <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+          <.icon
+            name="hero-wrench-screwdriver"
+            class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0"
+          />
           <span class="text-lg font-bold text-gray-900 dark:text-gray-100">
             {@tool.tool_name}
           </span>
@@ -723,8 +731,7 @@ defmodule AgentsDemoWeb.ChatComponents do
             class="px-5 py-2.5 bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 border-none rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
             type="button"
           >
-            <.icon name="hero-x-mark" class="w-4 h-4 inline-block mr-1" />
-            Reject
+            <.icon name="hero-x-mark" class="w-4 h-4 inline-block mr-1" /> Reject
           </button>
           <button
             phx-click="approve_tool"
@@ -732,8 +739,7 @@ defmodule AgentsDemoWeb.ChatComponents do
             class="px-5 py-2.5 bg-green-600 text-white border-none rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm"
             type="button"
           >
-            <.icon name="hero-check" class="w-4 h-4 inline-block mr-1" />
-            Approve
+            <.icon name="hero-check" class="w-4 h-4 inline-block mr-1" /> Approve
           </button>
         </div>
       </div>

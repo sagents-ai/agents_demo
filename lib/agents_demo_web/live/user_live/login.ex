@@ -41,12 +41,14 @@ defmodule AgentsDemoWeb.UserLive.Login do
               class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg"
             >
               <div class="flex gap-3">
-                <.icon name="hero-information-circle" class="w-6 h-6 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <.icon
+                  name="hero-information-circle"
+                  class="w-6 h-6 text-blue-600 dark:text-blue-400 flex-shrink-0"
+                />
                 <div class="text-sm text-blue-900 dark:text-blue-100">
                   <p class="font-semibold mb-1">Local mail adapter active</p>
                   <p>
-                    To see sent emails, visit
-                    <.link href="/dev/mailbox" class="underline font-medium">the mailbox page</.link>.
+                    To see sent emails, visit <.link href="/dev/mailbox" class="underline font-medium">the mailbox page</.link>.
                   </p>
                 </div>
               </div>

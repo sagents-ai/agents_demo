@@ -420,8 +420,12 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
   end
 
   @doc false
-  def validate_success_fields(%{"source_title" => title, "source_url" => url, "information" => info})
-       when is_binary(title) and is_binary(url) and is_binary(info) do
+  def validate_success_fields(%{
+        "source_title" => title,
+        "source_url" => url,
+        "information" => info
+      })
+      when is_binary(title) and is_binary(url) and is_binary(info) do
     cond do
       String.trim(title) == "" ->
         {:error, "source_title cannot be empty"}
