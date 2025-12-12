@@ -553,10 +553,10 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
       assert agent.middleware == []
     end
 
-    test "compiled subagent agent has system prompt", %{config: config} do
+    test "compiled subagent agent has base system prompt", %{config: config} do
       agent = config.compiled_subagent.agent
-      assert is_binary(agent.system_prompt)
-      assert String.contains?(agent.system_prompt, "web information retriever")
+      assert is_binary(agent.base_system_prompt)
+      assert String.contains?(agent.base_system_prompt, "web information retriever")
     end
 
     test "compiled subagent has empty initial_messages", %{config: config} do

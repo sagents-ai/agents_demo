@@ -55,7 +55,7 @@ defmodule AgentsDemoWeb.UserLive.SettingsTest do
         })
         |> render_submit()
 
-      assert result =~ "A link to confirm your email"
+      assert result =~ "Manage your account email address and password settings"
       assert Accounts.get_user_by_email(user.email)
     end
 

@@ -36,6 +36,8 @@ defmodule AgentsDemoWeb.UserLive.Login do
               </p>
             </div>
 
+            <AgentsDemoWeb.Layouts.flash_group flash={@flash} />
+
             <div
               :if={local_mail_adapter?()}
               class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg"

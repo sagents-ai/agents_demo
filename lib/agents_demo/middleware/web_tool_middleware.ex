@@ -252,7 +252,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
     LangChain.Agents.Agent.new!(
       %{
         model: model,
-        system_prompt: web_lookup_system_prompt(),
+        base_system_prompt: web_lookup_system_prompt(),
         tools: [search_web_tool(), fetch_page_tool()],
         middleware: []
       },

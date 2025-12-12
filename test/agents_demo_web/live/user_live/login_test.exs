@@ -8,8 +8,8 @@ defmodule AgentsDemoWeb.UserLive.LoginTest do
     test "renders login page", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/users/log-in")
 
-      assert html =~ "Log in"
-      assert html =~ "Register"
+      assert html =~ "Log In"
+      assert html =~ "Sign up"
       assert html =~ "Log in with email"
     end
   end
@@ -56,7 +56,7 @@ defmodule AgentsDemoWeb.UserLive.LoginTest do
 
       conn = submit_form(form, conn)
 
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/chat"
     end
 
     test "redirects to login page with a flash error if credentials are invalid", %{
@@ -81,7 +81,7 @@ defmodule AgentsDemoWeb.UserLive.LoginTest do
 
       {:ok, _login_live, login_html} =
         lv
-        |> element("main a", "Sign up")
+        |> element("a", "Sign up")
         |> render_click()
         |> follow_redirect(conn, ~p"/users/register")
 
