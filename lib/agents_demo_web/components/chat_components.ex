@@ -420,7 +420,7 @@ defmodule AgentsDemoWeb.ChatComponents do
               <div
                 id="messages-list"
                 phx-update="stream"
-                class="flex flex-col gap-6"
+                class="flex flex-col gap-4"
               >
                 <div :for={{id, message} <- @streams.messages} id={id}>
                   <.message message={message} />
@@ -529,7 +529,7 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class="flex-1 min-w-0 flex flex-col gap-3">
         <%= if @content_text && @content_text != "" do %>
           <div class={[
-            "px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
+            "px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
             @message.message_type == "user" &&
               "bg-[var(--color-user-message)] text-white",
             @message.message_type == "assistant" && "bg-[var(--color-surface)]",
@@ -693,9 +693,11 @@ defmodule AgentsDemoWeb.ChatComponents do
   def streaming_message(assigns) do
     # Convert merged_content to string for display
     assigns =
-      assign(
-        assigns,
-        :content,
+      assigns
+      |> assign(:thinking,
+        MessageDelta.content_to_string(assigns.streaming_delta, :thinking)
+      )
+      |> assign(:content,
         MessageDelta.content_to_string(assigns.streaming_delta, :text) || ""
       )
 
@@ -707,6 +709,12 @@ defmodule AgentsDemoWeb.ChatComponents do
 
       <div class="flex-1 min-w-0">
         <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
+          <div :if={@thinking} class="mb-2 px-3 py-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
+            <.markdown
+              text={@thinking}
+              class="prose-sm text-xs text-[var(--color-text-secondary)]"
+            />
+          </div>
           <.markdown text={@content} />
           <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
         </div>
