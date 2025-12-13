@@ -502,7 +502,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
     ~H"""
     <%= if @is_thinking do %>
-      <.thinking_message message={@message} content_text={@content_text} />
+      <.thinking_message class="ml-14" message={@message} content_text={@content_text} />
     <% else %>
       <.text_message message={@message} content_text={@content_text} />
     <% end %>
@@ -543,6 +543,10 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
+  attr :message, :any, required: true
+  attr :content_text, :string
+  attr :class, :string, default: nil
+
   # Component: Thinking Message (subdued, collapsible display)
   defp thinking_message(assigns) do
     # Generate unique IDs for this thinking block
@@ -555,7 +559,7 @@ defmodule AgentsDemoWeb.ChatComponents do
       |> assign(:chevron_id, chevron_id)
 
     ~H"""
-    <div class="flex gap-2 max-w-full opacity-70 hover:opacity-100 transition-opacity">
+    <div class={["flex gap-2 max-w-full opacity-70 hover:opacity-100 transition-opacity", @class]}>
       <div class="flex-1 min-w-0">
         <button
           type="button"
@@ -565,12 +569,12 @@ defmodule AgentsDemoWeb.ChatComponents do
             |> JS.toggle_class("rotate-90", to: "##{@chevron_id}")
           }
         >
+          <span class="text-sm italic text-[var(--color-text-secondary)]">Thinking</span>
           <.icon
             name="hero-chevron-right"
             id={@chevron_id}
             class="w-3 h-3 text-[var(--color-text-tertiary)] transition-transform duration-200"
           />
-          <span class="text-sm italic text-[var(--color-text-secondary)]">Thinking</span>
         </button>
 
         <%= if @content_text && @content_text != "" do %>

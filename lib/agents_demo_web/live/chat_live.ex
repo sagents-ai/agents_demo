@@ -16,9 +16,6 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @agent_id "demo-agent-001"
 
-  # TODO: Issues:
-  #
-
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
