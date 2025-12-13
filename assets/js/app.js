@@ -33,6 +33,36 @@ const Hooks = {
         this.el.scrollTop = this.el.scrollHeight
       })
     }
+  },
+  ConversationList: {
+    mounted() {
+      this.handleScroll = () => {
+        const scrollBottom = this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
+
+        // When user scrolls within 100px of bottom, load more conversations
+        if (scrollBottom < 100) {
+          this.pushEvent("load_more_conversations", {})
+        }
+      }
+
+      // Throttle scroll events to avoid excessive calls
+      this.throttledScroll = this.throttle(this.handleScroll, 200)
+      this.el.addEventListener("scroll", this.throttledScroll)
+    },
+    destroyed() {
+      this.el.removeEventListener("scroll", this.throttledScroll)
+    },
+    throttle(func, wait) {
+      let timeout
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout)
+          func.apply(this, args)
+        }
+        clearTimeout(timeout)
+        timeout = setTimeout(later, wait)
+      }
+    }
   }
 }
 

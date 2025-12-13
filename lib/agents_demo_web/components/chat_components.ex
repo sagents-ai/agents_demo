@@ -8,6 +8,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   import AgentsDemoWeb.CoreComponents
 
+  alias Phoenix.LiveView.JS
   alias LangChain.MessageDelta
   alias LangChain.Message.ContentPart
 
@@ -145,6 +146,93 @@ defmodule AgentsDemoWeb.ChatComponents do
     |> Enum.sort_by(fn {directory, _files} -> directory end)
   end
 
+  attr :conversation_list, :list, required: true
+  attr :conversation_id, :string, default: nil
+  attr :has_more, :boolean, default: false
+  attr :has_conversations, :boolean, default: false
+
+  # Component: Conversation History Sidebar
+  def conversation_history_sidebar(assigns) do
+    ~H"""
+    <div class="w-80 border-r border-[var(--color-border)] bg-[var(--color-surface)] flex-shrink-0 flex flex-col">
+      <div class="flex justify-between items-center px-6 py-4 border-b border-[var(--color-border)]">
+        <h3 class="m-0 text-lg">Thread History</h3>
+        <button
+          phx-click="toggle_thread_history"
+          class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors"
+          type="button"
+          title="Close"
+        >
+          <.icon name="hero-x-mark" class="w-5 h-5" />
+        </button>
+      </div>
+
+      <div
+        id="conversation-list-container"
+        class="flex-1 overflow-y-auto"
+        phx-hook="ConversationList"
+      >
+        <%!-- Empty state shown when no conversations --%>
+        <%= if not @has_conversations do %>
+          <div class="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
+            <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 text-[var(--color-text-tertiary)] mb-3" />
+            <p class="text-[var(--color-text-secondary)] text-sm m-0">No conversations yet</p>
+            <p class="text-[var(--color-text-tertiary)] text-xs m-0 mt-1">
+              Start a new conversation to get started
+            </p>
+          </div>
+        <% end %>
+
+        <%!-- Stream container - ONLY contains stream items per LiveView docs --%>
+        <div
+          id="conversation-list"
+          phx-update="stream"
+          class="flex flex-col"
+        >
+          <div
+            :for={{dom_id, conversation} <- @conversation_list}
+            id={dom_id}
+            class={[
+              "px-4 py-3 border-b border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-border-light)] transition-colors",
+              conversation.id == @conversation_id && "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-500"
+            ]}
+            phx-click="load_conversation"
+            phx-value-id={conversation.id}
+          >
+            <h4 class="text-sm font-medium text-[var(--color-text-primary)] m-0 mb-1 truncate">
+              {conversation.title}
+            </h4>
+            <p class="text-xs text-[var(--color-text-secondary)] m-0">
+              {format_relative_time(conversation.updated_at)}
+            </p>
+          </div>
+        </div>
+
+        <%= if @has_more do %>
+          <div class="flex items-center justify-center py-4">
+            <div class="w-4 h-4 border-2 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin">
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  # Helper to format relative time
+  defp format_relative_time(datetime) do
+    now = DateTime.utc_now()
+    diff_seconds = DateTime.diff(now, datetime, :second)
+
+    cond do
+      diff_seconds < 60 -> "Just now"
+      diff_seconds < 3600 -> "#{div(diff_seconds, 60)}m ago"
+      diff_seconds < 86400 -> "#{div(diff_seconds, 3600)}h ago"
+      diff_seconds < 604_800 -> "#{div(diff_seconds, 86400)}d ago"
+      true -> Calendar.strftime(datetime, "%b %d, %Y")
+    end
+  end
+
   attr :todos, :list, required: true, doc: "List of TODO items for display"
 
   def todo_items(assigns) do
@@ -232,6 +320,9 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :agent_status, :atom, default: :idle
   attr :pending_tools, :list, default: []
   attr :current_scope, :any, default: nil
+  attr :conversation_id, :string, default: nil
+  attr :has_more_conversations, :boolean, default: false
+  attr :has_conversations, :boolean, default: false
 
   # Component: Chat Interface
   def chat_interface(assigns) do
@@ -300,21 +391,12 @@ defmodule AgentsDemoWeb.ChatComponents do
 
       <div class="flex flex-1 relative overflow-hidden">
         <%= if @is_thread_history_open do %>
-          <div class="w-80 border-r border-[var(--color-border)] bg-[var(--color-surface)] overflow-y-auto flex-shrink-0 flex flex-col">
-            <div class="flex justify-between items-center px-6 py-4 border-b border-[var(--color-border)]">
-              <h3 class="m-0 text-lg">Thread History</h3>
-              <button
-                phx-click="toggle_thread_history"
-                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded"
-                type="button"
-              >
-                <.icon name="hero-x-mark" class="w-5 h-5" />
-              </button>
-            </div>
-            <div class="flex-1 p-4">
-              <p class="text-[var(--color-text-secondary)] text-sm">No threads yet</p>
-            </div>
-          </div>
+          <.conversation_history_sidebar
+            conversation_list={@streams.conversation_list}
+            conversation_id={@conversation_id}
+            has_more={@has_more_conversations}
+            has_conversations={@has_conversations}
+          />
         <% end %>
 
         <div class="flex flex-1 flex-col overflow-hidden relative">
@@ -407,16 +489,37 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :message, :any, required: true
 
   # Component: Individual Message
+  # Expects a DisplayMessage struct
   def message(assigns) do
+    # Extract text content from DisplayMessage JSONB content field
+    content_text = get_in(assigns.message.content, ["text"]) || ""
+    is_thinking = assigns.message.content_type == "thinking"
+
+    assigns =
+      assigns
+      |> assign(:content_text, content_text)
+      |> assign(:is_thinking, is_thinking)
+
+    ~H"""
+    <%= if @is_thinking do %>
+      <.thinking_message message={@message} content_text={@content_text} />
+    <% else %>
+      <.text_message message={@message} content_text={@content_text} />
+    <% end %>
+    """
+  end
+
+  # Component: Text Message (normal message display)
+  defp text_message(assigns) do
     ~H"""
     <div class="flex gap-4 max-w-full">
       <div class={[
         "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
-        @message.type == :user && "bg-[var(--color-user-message)] text-white",
-        @message.type == :assistant && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
-        @message.type == :tool && "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
+        @message.message_type == "user" && "bg-[var(--color-user-message)] text-white",
+        @message.message_type == "assistant" && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
+        @message.message_type == "tool" && "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
       ]}>
-        <%= if @message.type == :user do %>
+        <%= if @message.message_type == "user" do %>
           <.icon name="hero-user" class="w-5 h-5" />
         <% else %>
           <.icon name="hero-cpu-chip" class="w-5 h-5" />
@@ -424,33 +527,60 @@ defmodule AgentsDemoWeb.ChatComponents do
       </div>
 
       <div class="flex-1 min-w-0 flex flex-col gap-3">
-        <%= if @message.content && @message.content != "" do %>
+        <%= if @content_text && @content_text != "" do %>
           <div class={[
             "px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
-            @message.type == :user &&
+            @message.message_type == "user" &&
               "bg-[var(--color-user-message)] text-white",
-            @message.type == :assistant && "bg-[var(--color-surface)]",
-            @message.type == :tool && "bg-[var(--color-background)]"
+            @message.message_type == "assistant" && "bg-[var(--color-surface)]",
+            @message.message_type == "tool" && "bg-[var(--color-background)]"
           ]}>
-            <.markdown text={@message.content} invert={@message.type == :user} />
+            <.markdown text={@content_text} invert={@message.message_type == "user"} />
           </div>
         <% end %>
+      </div>
+    </div>
+    """
+  end
 
-        <%!-- Render tool calls if present --%>
-        <%= if Map.get(@message, :tool_calls) && length(@message.tool_calls) > 0 do %>
-          <div class="flex flex-col gap-2">
-            <%= for tool_call <- @message.tool_calls do %>
-              <.tool_call_item tool_call={tool_call} />
-            <% end %>
-          </div>
-        <% end %>
+  # Component: Thinking Message (subdued, collapsible display)
+  defp thinking_message(assigns) do
+    # Generate unique IDs for this thinking block
+    thinking_id = "thinking-#{assigns.message.id}"
+    chevron_id = "chevron-#{assigns.message.id}"
 
-        <%!-- Render tool results if present --%>
-        <%= if Map.get(@message, :tool_results) && length(@message.tool_results) > 0 do %>
-          <div class="flex flex-col gap-2">
-            <%= for tool_result <- @message.tool_results do %>
-              <.tool_result_item tool_result={tool_result} />
-            <% end %>
+    assigns =
+      assigns
+      |> assign(:thinking_id, thinking_id)
+      |> assign(:chevron_id, chevron_id)
+
+    ~H"""
+    <div class="flex gap-2 max-w-full opacity-70 hover:opacity-100 transition-opacity">
+      <div class="flex-1 min-w-0">
+        <button
+          type="button"
+          class="flex items-center gap-2 w-full text-left py-1 px-2 rounded hover:bg-[var(--color-border-light)] transition-colors cursor-pointer border-none bg-transparent"
+          phx-click={
+            JS.toggle(to: "##{@thinking_id}")
+            |> JS.toggle_class("rotate-90", to: "##{@chevron_id}")
+          }
+        >
+          <.icon
+            name="hero-chevron-right"
+            id={@chevron_id}
+            class="w-3 h-3 text-[var(--color-text-tertiary)] transition-transform duration-200"
+          />
+          <span class="text-sm italic text-[var(--color-text-secondary)]">Thinking</span>
+        </button>
+
+        <%= if @content_text && @content_text != "" do %>
+          <div id={@thinking_id} class="hidden mt-1 ml-5">
+            <div class="px-3 py-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
+              <.markdown
+                text={@content_text}
+                class="prose-sm text-xs text-[var(--color-text-secondary)]"
+              />
+            </div>
           </div>
         <% end %>
       </div>

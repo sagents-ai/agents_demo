@@ -8,10 +8,11 @@ defmodule AgentsDemoWeb.ChatLive do
   alias LangChain.Agents.FileSystemServer
   alias LangChain.Agents.Todo
   alias LangChain.Message
-  alias LangChain.Message.ContentPart
   alias LangChain.Message.ToolCall
   alias LangChain.Message.ToolResult
   alias LangChain.MessageDelta
+  alias AgentsDemo.Conversations
+  alias AgentsDemo.Conversations.DisplayMessage
 
   @agent_id "demo-agent-001"
 
@@ -33,9 +34,12 @@ defmodule AgentsDemoWeb.ChatLive do
     {:ok,
      socket
      |> stream(:messages, [])
+     |> stream(:conversation_list, [])
      |> assign(:input, "")
      |> assign(:loading, false)
      |> assign(:thread_id, nil)
+     |> assign(:conversation, nil)
+     |> assign(:conversation_id, nil)
      |> assign(:todos, [])
      |> assign_filesystem_files()
      |> assign(:sidebar_collapsed, false)
@@ -49,22 +53,35 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:streaming_delta, nil)
      |> assign(:agent_status, :idle)
      |> assign(:pending_tools, [])
-     |> assign(:interrupt_data, nil)}
+     |> assign(:interrupt_data, nil)
+     |> assign(:conversations_loaded, 0)
+     |> assign(:has_more_conversations, true)
+     |> assign(:has_conversations, false)}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    thread_id = params["thread_id"]
+    conversation_id = params["conversation_id"]
+    previous_conversation_id = socket.assigns.conversation_id
 
     socket =
-      if thread_id && thread_id != socket.assigns.thread_id do
-        # Load thread state when thread_id changes
-        load_thread(socket, thread_id)
-      else
-        socket
+      cond do
+        # Load conversation if conversation_id is present and different from current
+        conversation_id && conversation_id != previous_conversation_id ->
+          socket
+          |> load_conversation(conversation_id)
+          |> update_conversation_selection(previous_conversation_id, conversation_id)
+
+        # If no conversation_id in URL, reset to fresh state
+        is_nil(conversation_id) && previous_conversation_id ->
+          reset_conversation_state(socket)
+
+        # No change needed
+        true ->
+          socket
       end
 
-    {:noreply, assign(socket, :thread_id, thread_id)}
+    {:noreply, socket}
   end
 
   @impl true
@@ -74,37 +91,50 @@ defmodule AgentsDemoWeb.ChatLive do
     if message_text == "" or socket.assigns.loading do
       {:noreply, socket}
     else
-      # Add user message immediately to UI
-      user_message = %{
-        id: generate_id(),
-        type: :user,
-        content: message_text,
-        timestamp: DateTime.utc_now()
-      }
+      # Create conversation if this is the first message
+      socket =
+        case socket.assigns.conversation_id do
+          nil ->
+            create_new_conversation(socket, message_text)
 
-      # Create LangChain Message
-      langchain_message = Message.new_user!(message_text)
+          _id ->
+            socket
+        end
 
-      # Add message to AgentServer and execute
-      case AgentServer.add_message(@agent_id, langchain_message) do
-        :ok ->
-          Logger.info("Agent execution started")
+      # Persist user message to database
+      case persist_user_message(socket.assigns.conversation_id, message_text) do
+        {:ok, display_msg} ->
+          # Create LangChain Message
+          langchain_message = Message.new_user!(message_text)
 
-          {:noreply,
-           socket
-           |> assign(:input, "")
-           |> assign(:loading, true)
-           |> assign(:has_messages, true)
-           |> stream_insert(:messages, user_message)
-           |> push_event("scroll-to-bottom", %{})}
+          # Add message to AgentServer and execute
+          case AgentServer.add_message(@agent_id, langchain_message) do
+            :ok ->
+              Logger.info("Agent execution started")
+
+              {:noreply,
+               socket
+               |> assign(:input, "")
+               |> assign(:loading, true)
+               |> assign(:has_messages, true)
+               |> stream_insert(:messages, display_msg)
+               |> push_event("scroll-to-bottom", %{})}
+
+            {:error, reason} ->
+              Logger.error("Failed to execute agent: #{inspect(reason)}")
+
+              {:noreply,
+               socket
+               |> assign(:loading, false)
+               |> put_flash(:error, "Failed to start agent: #{inspect(reason)}")}
+          end
 
         {:error, reason} ->
-          Logger.error("Failed to execute agent: #{inspect(reason)}")
+          Logger.error("Failed to persist user message: #{inspect(reason)}")
 
           {:noreply,
            socket
-           |> assign(:loading, false)
-           |> put_flash(:error, "Failed to start agent: #{inspect(reason)}")}
+           |> put_flash(:error, "Failed to save message")}
       end
     end
   end
@@ -154,19 +184,38 @@ defmodule AgentsDemoWeb.ChatLive do
 
     {:noreply,
      socket
-     |> assign(:thread_id, nil)
+     |> assign(:conversation, nil)
+     |> assign(:conversation_id, nil)
      |> stream(:messages, [], reset: true)
      |> assign(:has_messages, false)
-     #  |> assign(:todos, [])
-     #  |> assign(:files, %{})
      |> assign(:selected_sub_agent, nil)
      |> push_patch(to: ~p"/chat")
-     |> put_flash(:info, "New thread started")}
+     |> put_flash(:info, "New conversation started")}
   end
 
   @impl true
   def handle_event("toggle_thread_history", _params, socket) do
-    {:noreply, assign(socket, :is_thread_history_open, !socket.assigns.is_thread_history_open)}
+    is_opening = !socket.assigns.is_thread_history_open
+
+    socket =
+      if is_opening do
+        # When opening, reset and reload the stream to ensure items render
+        scope = socket.assigns.current_scope
+        conversations = Conversations.list_conversations(scope, limit: 20, offset: 0)
+
+        loaded_count = length(conversations)
+
+        socket
+        |> assign(:is_thread_history_open, true)
+        |> stream(:conversation_list, conversations, reset: true)
+        |> assign(:conversations_loaded, loaded_count)
+        |> assign(:has_more_conversations, loaded_count == 20)
+        |> assign(:has_conversations, loaded_count > 0)
+      else
+        assign(socket, :is_thread_history_open, false)
+      end
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -264,6 +313,31 @@ defmodule AgentsDemoWeb.ChatLive do
      socket
      |> assign(:selected_file_path, nil)
      |> assign(:selected_file_content, nil)}
+  end
+
+  @impl true
+  def handle_event("load_more_conversations", _params, socket) do
+    # Only load more if there are potentially more conversations
+    if socket.assigns.has_more_conversations do
+      scope = socket.assigns.current_scope
+      offset = socket.assigns.conversations_loaded
+
+      new_conversations = Conversations.list_conversations(scope, limit: 20, offset: offset)
+
+      {:noreply,
+       socket
+       |> stream(:conversation_list, new_conversations, at: -1)
+       |> assign(:conversations_loaded, offset + length(new_conversations))
+       |> assign(:has_more_conversations, length(new_conversations) == 20)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("load_conversation", %{"id" => conversation_id}, socket) do
+    # Navigate to the selected conversation
+    {:noreply, push_patch(socket, to: ~p"/chat?conversation_id=#{conversation_id}")}
   end
 
   @impl true
@@ -429,19 +503,143 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
+  def handle_info({:conversation_title_generated, new_title, agent_id}, socket) do
+    # Verify this is for our agent and we have a current conversation
+    if agent_id == @agent_id && socket.assigns.conversation do
+      # Update database
+      case Conversations.update_conversation(socket.assigns.conversation, %{title: new_title}) do
+        {:ok, updated_conversation} ->
+          Logger.info("Updated conversation title to: #{new_title}")
+
+          {:noreply,
+           socket
+           |> assign(:conversation, updated_conversation)}
+
+        {:error, reason} ->
+          Logger.error("Failed to update conversation title: #{inspect(reason)}")
+          {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_info(_msg, socket) do
     # Ignore unknown messages
     {:noreply, socket}
   end
 
-  defp load_thread(socket, _thread_id) do
-    # TODO: Load thread state from storage/agent
-    # For now, just return empty state
+  # Load conversation from database
+  defp load_conversation(socket, conversation_id) do
+    scope = socket.assigns.current_scope
+
+    conversation = Conversations.get_conversation!(scope, conversation_id)
+
+    # Load display messages
+    display_messages = Conversations.load_display_messages(conversation_id)
+
+    # Restore agent state if it exists
+    case Conversations.load_agent_state(conversation_id) do
+      {:ok, state_data} ->
+        AgentServer.restore_state(@agent_id, state_data)
+
+      {:error, :not_found} ->
+        # No saved state, fresh start
+        :ok
+    end
+
     socket
+    |> assign(:conversation, conversation)
+    |> assign(:conversation_id, conversation_id)
+    |> stream(:messages, display_messages, reset: true)
+    |> assign(:has_messages, length(display_messages) > 0)
+  rescue
+    Ecto.NoResultsError ->
+      socket
+      |> put_flash(:error, "Conversation not found")
+      |> push_navigate(to: ~p"/chat")
+  end
+
+  # Reset to fresh conversation state
+  defp reset_conversation_state(socket) do
+    AgentServer.reset(@agent_id)
+
+    socket
+    |> assign(:conversation, nil)
+    |> assign(:conversation_id, nil)
     |> stream(:messages, [], reset: true)
     |> assign(:has_messages, false)
-    |> assign(:todos, [])
-    |> assign(:files, %{})
+  end
+
+  # Update conversation selection in the stream to reflect active state
+  # This re-inserts both the previous and new conversation items so they re-render
+  # with the updated @conversation_id assign, updating the active styling
+  defp update_conversation_selection(socket, previous_id, new_id) do
+    scope = socket.assigns.current_scope
+
+    # Only update if the history sidebar is open and has conversations
+    if socket.assigns.is_thread_history_open && socket.assigns.has_conversations do
+      # Re-insert previous conversation to clear its active state
+      socket =
+        if previous_id do
+          try do
+            prev_conversation = Conversations.get_conversation!(scope, previous_id)
+            stream_insert(socket, :conversation_list, prev_conversation)
+          rescue
+            Ecto.NoResultsError ->
+              # Previous conversation not found, skip it
+              socket
+          end
+        else
+          socket
+        end
+
+      # Re-insert new conversation to set its active state
+      try do
+        new_conversation = Conversations.get_conversation!(scope, new_id)
+        stream_insert(socket, :conversation_list, new_conversation)
+      rescue
+        Ecto.NoResultsError ->
+          # New conversation not found (shouldn't happen), skip it
+          socket
+      end
+    else
+      # History sidebar not open, no need to update stream
+      socket
+    end
+  end
+
+  # Create new conversation in database
+  defp create_new_conversation(socket, first_message_text) do
+    scope = socket.assigns.current_scope
+
+    # Generate title from first message (truncate at 60 chars)
+    title = String.slice(first_message_text, 0, 60)
+
+    case Conversations.create_conversation(scope, %{
+           title: title,
+           metadata: %{"version" => 1}
+         }) do
+      {:ok, conversation} ->
+        Logger.info("Created new conversation: #{conversation.id}")
+
+        socket
+        |> assign(:conversation, conversation)
+        |> assign(:conversation_id, conversation.id)
+        |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
+
+      {:error, changeset} ->
+        Logger.error("Failed to create conversation: #{inspect(changeset)}")
+
+        socket
+        |> put_flash(:error, "Failed to create conversation")
+    end
+  end
+
+  # Persist user message to database
+  defp persist_user_message(conversation_id, message_text) do
+    Conversations.append_text_message(conversation_id, "user", message_text)
   end
 
   defp generate_id do
@@ -457,35 +655,117 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   defp finalize_streaming_message(socket, message) do
-    # Use the complete message from the LLM
-    # The message struct has the final, complete content
-    ui_message = %{
-      id: generate_id(),
-      type: message.role,
-      content: extract_message_content(message),
-      tool_calls: message.tool_calls,
-      tool_results: message.tool_results,
-      timestamp: DateTime.utc_now()
-    }
+    conversation_id = socket.assigns.conversation_id
 
-    socket
-    |> assign(:streaming_delta, nil)
-    |> assign(:has_messages, true)
-    |> stream_insert(:messages, ui_message)
-  end
+    # Extract both thinking and text content from message
+    content_parts = extract_message_content_parts(message)
 
-  # Extract content from Message struct
-  defp extract_message_content(%Message{content: content}) when is_binary(content), do: content
-
-  defp extract_message_content(%Message{content: content}) when is_list(content) do
-    # Handle list of ContentPart structs
-    case ContentPart.parts_to_string(content) do
-      nil -> ""
-      text -> text
+    # Log warning if no content - this shouldn't happen
+    if Enum.empty?(content_parts) do
+      Logger.warning(
+        "Received empty message content. Message: #{inspect(message)}, " <>
+          "Streaming delta: #{inspect(socket.assigns.streaming_delta)}"
+      )
     end
+
+    # Persist and display each content part
+    socket =
+      if not Enum.empty?(content_parts) do
+        # Persist each content part to database if conversation exists
+        display_msgs =
+          if conversation_id do
+            persist_content_parts(conversation_id, content_parts)
+          else
+            # No conversation yet - create in-memory messages
+            create_in_memory_messages(content_parts, conversation_id)
+          end
+
+        # Insert all messages into the stream
+        Enum.reduce(display_msgs, socket, fn msg, acc ->
+          acc
+          |> assign(:has_messages, true)
+          |> stream_insert(:messages, msg)
+        end)
+      else
+        # Empty content - don't persist or display
+        socket
+      end
+
+    # Always clear streaming state
+    assign(socket, :streaming_delta, nil)
   end
 
-  defp extract_message_content(_), do: ""
+  # Extract content parts from Message struct
+  # Returns a list of {type, content} tuples, e.g. [{:thinking, "..."}, {:text, "..."}]
+  defp extract_message_content_parts(%Message{content: content}) when is_binary(content) do
+    [{:text, content}]
+  end
+
+  defp extract_message_content_parts(%Message{content: content}) when is_list(content) do
+    # Handle list of ContentPart structs - extract both thinking and text
+    content
+    |> Enum.filter(fn part -> part.type in [:thinking, :text] end)
+    |> Enum.map(fn part -> {part.type, part.content} end)
+    |> Enum.reject(fn {_type, content} -> is_nil(content) or content == "" end)
+  end
+
+  defp extract_message_content_parts(_), do: []
+
+  # Persist content parts to database, returning list of DisplayMessage structs
+  defp persist_content_parts(conversation_id, content_parts) do
+    content_parts
+    |> Enum.with_index()
+    |> Enum.map(fn {{type, content}, _index} ->
+      case type do
+        :thinking ->
+          case Conversations.append_thinking_message(conversation_id, content) do
+            {:ok, msg} ->
+              msg
+
+            {:error, reason} ->
+              Logger.error("Failed to persist thinking message: #{inspect(reason)}")
+              create_fallback_message(conversation_id, type, content)
+          end
+
+        :text ->
+          case Conversations.append_text_message(conversation_id, "assistant", content) do
+            {:ok, msg} ->
+              msg
+
+            {:error, reason} ->
+              Logger.error("Failed to persist text message: #{inspect(reason)}")
+              create_fallback_message(conversation_id, type, content)
+          end
+      end
+    end)
+  end
+
+  # Create in-memory messages when no conversation exists
+  defp create_in_memory_messages(content_parts, conversation_id) do
+    content_parts
+    |> Enum.with_index()
+    |> Enum.map(fn {{type, content}, _index} ->
+      create_fallback_message(conversation_id, type, content)
+    end)
+  end
+
+  # Create a fallback in-memory DisplayMessage
+  defp create_fallback_message(conversation_id, type, content) do
+    {content_type, message_type} =
+      case type do
+        :thinking -> {"thinking", "assistant"}
+        :text -> {"text", "assistant"}
+      end
+
+    %DisplayMessage{
+      id: Ecto.UUID.generate(),
+      conversation_id: conversation_id,
+      message_type: message_type,
+      content_type: content_type,
+      content: %{"text" => content},
+      inserted_at: DateTime.utc_now()
+    }
+  end
 
   defp assign_filesystem_files(socket) do
     try do
@@ -542,6 +822,9 @@ defmodule AgentsDemoWeb.ChatLive do
           agent_status={@agent_status}
           pending_tools={@pending_tools}
           current_scope={@current_scope}
+          conversation_id={@conversation_id}
+          has_more_conversations={@has_more_conversations}
+          has_conversations={@has_conversations}
         />
       </div>
 
