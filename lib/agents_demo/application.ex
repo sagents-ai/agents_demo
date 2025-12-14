@@ -12,6 +12,7 @@ defmodule AgentsDemo.Application do
   alias LangChain.Agents.FileSystem.FileSystemConfig
   alias LangChain.Agents.FileSystem.Persistence.Disk
   alias AgentsDemo.Middleware.WebToolMiddleware
+  alias LangChain.Utils.BedrockConfig
 
   # New anthropic models to use
   @claude_model "claude-sonnet-4-5-20250929"
@@ -21,9 +22,9 @@ defmodule AgentsDemo.Application do
   # # @claude_model "claude-3-7-sonnet-latest"
   # # @bedrock_claude_model "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 
-  # # Title models
-  # @title_model "claude-3-5-haiku-latest"
-  # @title_fallback_bedrock_model "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+  # Title models
+  @title_model "claude-3-5-haiku-latest"
+  @title_fallback_model "us.anthropic.claude-3-5-haiku-20241022-v1:0"
 
   @impl true
   def start(_type, _args) do
@@ -66,12 +67,16 @@ defmodule AgentsDemo.Application do
     model =
       ChatAnthropic.new!(%{
         model: @claude_model,
+        thinking: %{type: "enabled", budget_tokens: 2000},
         api_key: api_key,
-        temperature: 0.7,
+        temperature: 1,
         stream: true
       })
 
-    # Create the Agent
+    # Create initial state (no longer storing title config in metadata)
+    initial_state = LangChain.Agents.State.new!(%{})
+
+    # Create the Agent with title configuration as first-class config
     agent =
       Agent.new!(
         %{
@@ -88,7 +93,10 @@ defmodule AgentsDemo.Application do
           use the web_lookup tool to get accurate, up-to-date information.
           """,
           name: "Demo Agent",
-          middleware: [WebToolMiddleware]
+          middleware: [WebToolMiddleware],
+          # Create title generation LLMs
+          title_chat_model: get_title_model(api_key),
+          title_fallbacks: get_title_fallbacks()
         },
         # Adding "Human In The Loop" (hitl) control for writing and deleting
         # files
@@ -121,11 +129,34 @@ defmodule AgentsDemo.Application do
     # Return the agent supervisor configuration
     [
       agent: agent,
+      initial_state: initial_state,
       persistence_configs: [fs_config],
       pubsub: Phoenix.PubSub,
       pubsub_name: AgentsDemo.PubSub,
       # The demo only works with 1 agent. Keep it running with the application.
       inactivity_timeout: :infinity
+    ]
+  end
+
+  # Get the primary title generation model
+  defp get_title_model(api_key) do
+    ChatAnthropic.new!(%{
+      model: @title_model,
+      api_key: api_key,
+      temperature: 1,
+      stream: false
+    })
+  end
+
+  # Get the list of fallback title generation models
+  defp get_title_fallbacks() do
+    [
+      ChatAnthropic.new!(%{
+        model: @title_fallback_model,
+        bedrock: BedrockConfig.from_application_env!(),
+        temperature: 1,
+        stream: false
+      })
     ]
   end
 end
