@@ -502,7 +502,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
     ~H"""
     <%= if @is_thinking do %>
-      <.thinking_message class="ml-14" message={@message} content_text={@content_text} />
+      <.thinking_display class="ml-14" message_id={@message.id} content_text={@content_text} />
     <% else %>
       <.text_message message={@message} content_text={@content_text} />
     <% end %>
@@ -543,15 +543,15 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
-  attr :message, :any, required: true
+  attr :message_id, :any, required: true
   attr :content_text, :string
   attr :class, :string, default: nil
 
   # Component: Thinking Message (subdued, collapsible display)
-  defp thinking_message(assigns) do
+  defp thinking_display(assigns) do
     # Generate unique IDs for this thinking block
-    thinking_id = "thinking-#{assigns.message.id}"
-    chevron_id = "chevron-#{assigns.message.id}"
+    thinking_id = "thinking-#{assigns.message_id}"
+    chevron_id = "chevron-#{assigns.message_id}"
 
     assigns =
       assigns
@@ -709,12 +709,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
       <div class="flex-1 min-w-0">
         <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-          <div :if={@thinking} class="mb-2 px-3 py-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
-            <.markdown
-              text={@thinking}
-              class="prose-sm text-xs text-[var(--color-text-secondary)]"
-            />
-          </div>
+          <.thinking_display :if={@thinking} class="mb-2" message_id="streaming_delta" content_text={@thinking} />
           <.markdown text={@content} />
           <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
         </div>
