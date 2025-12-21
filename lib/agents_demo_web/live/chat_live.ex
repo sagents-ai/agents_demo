@@ -469,7 +469,6 @@ defmodule AgentsDemoWeb.ChatLive do
   @impl true
   def handle_info({:llm_deltas, deltas}, socket) do
     # Append deltas to current streaming message
-    # deltas is a list, so we need to iterate through them
     socket =
       socket
       |> update_streaming_message(deltas)
@@ -508,9 +507,19 @@ defmodule AgentsDemoWeb.ChatLive do
         {:ok, updated_conversation} ->
           Logger.info("Updated conversation title to: #{new_title}")
 
-          {:noreply,
-           socket
-           |> assign(:conversation, updated_conversation)}
+          socket =
+            socket
+            |> assign(:conversation, updated_conversation)
+
+          # If thread history is open, update the conversation in the stream
+          socket =
+            if socket.assigns.is_thread_history_open do
+              stream_insert(socket, :conversation_list, updated_conversation)
+            else
+              socket
+            end
+
+          {:noreply, socket}
 
         {:error, reason} ->
           Logger.error("Failed to update conversation title: #{inspect(reason)}")
@@ -621,10 +630,23 @@ defmodule AgentsDemoWeb.ChatLive do
       {:ok, conversation} ->
         Logger.info("Created new conversation: #{conversation.id}")
 
+        socket =
+          socket
+          |> assign(:conversation, conversation)
+          |> assign(:conversation_id, conversation.id)
+          |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
+
+        # If thread history is open, insert the new conversation at the top of the list
+        socket =
+          if socket.assigns.is_thread_history_open do
+            socket
+            |> stream_insert(:conversation_list, conversation, at: 0)
+            |> assign(:has_conversations, true)
+          else
+            socket
+          end
+
         socket
-        |> assign(:conversation, conversation)
-        |> assign(:conversation_id, conversation.id)
-        |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
 
       {:error, changeset} ->
         Logger.error("Failed to create conversation: #{inspect(changeset)}")

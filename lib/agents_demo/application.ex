@@ -11,6 +11,7 @@ defmodule AgentsDemo.Application do
   alias LangChain.Agents.AgentSupervisor
   alias LangChain.Agents.FileSystem.FileSystemConfig
   alias LangChain.Agents.FileSystem.Persistence.Disk
+  alias LangChain.Agents.Middleware.ConversationTitle
   alias AgentsDemo.Middleware.WebToolMiddleware
   alias LangChain.Utils.BedrockConfig
 
@@ -73,10 +74,10 @@ defmodule AgentsDemo.Application do
         stream: true
       })
 
-    # Create initial state (no longer storing title config in metadata)
+    # Create initial state
     initial_state = LangChain.Agents.State.new!(%{})
 
-    # Create the Agent with title configuration as first-class config
+    # Create the Agent with ConversationTitle middleware for automatic title generation
     agent =
       Agent.new!(
         %{
@@ -93,10 +94,13 @@ defmodule AgentsDemo.Application do
           use the web_lookup tool to get accurate, up-to-date information.
           """,
           name: "Demo Agent",
-          middleware: [WebToolMiddleware],
-          # Create title generation LLMs
-          title_chat_model: get_title_model(api_key),
-          title_fallbacks: get_title_fallbacks()
+          middleware: [
+            WebToolMiddleware,
+            {ConversationTitle, [
+              chat_model: get_title_model(api_key),
+              fallbacks: get_title_fallbacks()
+            ]}
+          ]
         },
         # Adding "Human In The Loop" (hitl) control for writing and deleting
         # files
@@ -131,8 +135,7 @@ defmodule AgentsDemo.Application do
       agent: agent,
       initial_state: initial_state,
       persistence_configs: [fs_config],
-      pubsub: Phoenix.PubSub,
-      pubsub_name: AgentsDemo.PubSub,
+      pubsub: {Phoenix.PubSub, AgentsDemo.PubSub},
       # The demo only works with 1 agent. Keep it running with the application.
       inactivity_timeout: :infinity
     ]
