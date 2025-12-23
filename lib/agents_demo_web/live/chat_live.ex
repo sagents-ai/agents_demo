@@ -53,7 +53,8 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:interrupt_data, nil)
      |> assign(:conversations_loaded, 0)
      |> assign(:has_more_conversations, true)
-     |> assign(:has_conversations, false)}
+     |> assign(:has_conversations, false)
+     |> assign(:page_title, "Agents Demo")}
   end
 
   @impl true
@@ -142,22 +143,9 @@ defmodule AgentsDemoWeb.ChatLive do
 
     case AgentServer.cancel(@agent_id) do
       :ok ->
-        # Create a cancellation message to display in the chat
-        cancellation_message = %{
-          id: generate_id(),
-          type: :assistant,
-          content: "_Action was cancelled by user._",
-          timestamp: DateTime.utc_now()
-        }
-
-        {:noreply,
-         socket
-         |> assign(:loading, false)
-         |> assign(:agent_status, :completed)
-         |> assign(:streaming_delta, nil)
-         |> stream_insert(:messages, cancellation_message)
-         |> push_event("scroll-to-bottom", %{})
-         |> put_flash(:info, "Agent execution cancelled")}
+        # The cancellation message will be created when we receive the
+        # {:status_changed, :cancelled, nil} event from AgentServer
+        {:noreply, socket}
 
       {:error, reason} ->
         Logger.error("Failed to cancel agent: #{inspect(reason)}")
@@ -183,6 +171,7 @@ defmodule AgentsDemoWeb.ChatLive do
      socket
      |> assign(:conversation, nil)
      |> assign(:conversation_id, nil)
+     |> assign(:page_title, "Agents Demo")
      |> stream(:messages, [], reset: true)
      |> assign(:has_messages, false)
      |> assign(:selected_sub_agent, nil)
@@ -338,6 +327,52 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
+  def handle_event("delete_conversation", %{"id" => conversation_id}, socket) do
+    scope = socket.assigns.current_scope
+    is_current = conversation_id == socket.assigns.conversation_id
+
+    # Get conversation for logging and flash message
+    conversation = Conversations.get_conversation!(scope, conversation_id)
+
+    case Conversations.delete_conversation(scope, conversation_id) do
+      {:ok, _deleted} ->
+        Logger.info("Deleted conversation #{conversation_id}")
+
+        socket =
+          socket
+          # Remove from stream
+          |> stream_delete(:conversation_list, conversation)
+          # Update counts
+          |> assign(:conversations_loaded, socket.assigns.conversations_loaded - 1)
+          |> assign(:has_conversations, socket.assigns.conversations_loaded > 0)
+
+        # If this was the active conversation, reset to new conversation state
+        socket =
+          if is_current do
+            socket
+            |> reset_conversation_state()
+            |> put_flash(:info, "Current conversation deleted. Starting new conversation.")
+          else
+            put_flash(
+              socket,
+              :info,
+              "Conversation \"#{conversation.title}\" deleted successfully"
+            )
+          end
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        Logger.error("Failed to delete conversation: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to delete conversation")}
+    end
+  rescue
+    Ecto.NoResultsError ->
+      Logger.warning("Attempted to delete non-existent conversation #{conversation_id}")
+      {:noreply, put_flash(socket, :error, "Conversation not found")}
+  end
+
+  @impl true
   def handle_event("approve_tool", %{"index" => index_str}, socket) do
     index = String.to_integer(index_str)
     pending_tools = socket.assigns.pending_tools
@@ -409,11 +444,85 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_info({:status_changed, :completed, _final_state}, socket) do
     Logger.info("Agent completed execution")
 
+    # Persist agent state after successful completion
+    if socket.assigns.conversation_id do
+      try do
+        state_data = AgentServer.export_state(@agent_id)
+
+        case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
+          {:ok, _} ->
+            Logger.info(
+              "Persisted agent state for conversation #{socket.assigns.conversation_id}"
+            )
+
+          {:error, reason} ->
+            Logger.error("Failed to persist agent state on completion: #{inspect(reason)}")
+        end
+      rescue
+        error ->
+          Logger.error("Exception while persisting agent state on completion: #{inspect(error)}")
+          Logger.debug("Conversation ID: #{socket.assigns.conversation_id}")
+      end
+    end
+
     # Don't create messages here - they should be added via :llm_message and :tool_response handlers
     {:noreply,
      socket
      |> assign(:loading, false)
      |> assign(:agent_status, :completed)
+     |> assign_filesystem_files()}
+  end
+
+  @impl true
+  def handle_info({:status_changed, :cancelled, _data}, socket) do
+    Logger.info("Agent execution was cancelled")
+
+    # Persist cancellation message to database and display it
+    cancellation_text = "_Agent execution cancelled by user. Partial response discarded._"
+
+    cancellation_message =
+      if socket.assigns.conversation_id do
+        # Persist to database
+        case Conversations.append_text_message(
+               socket.assigns.conversation_id,
+               "assistant",
+               cancellation_text
+             ) do
+          {:ok, display_msg} ->
+            display_msg
+
+          {:error, reason} ->
+            Logger.error("Failed to persist cancellation message: #{inspect(reason)}")
+            # Create fallback in-memory message
+            %{
+              id: generate_id(),
+              message_type: :assistant,
+              content_type: "text",
+              content: %{"text" => cancellation_text},
+              timestamp: DateTime.utc_now()
+            }
+        end
+      else
+        # No conversation yet - create in-memory message
+        %{
+          id: generate_id(),
+          message_type: :assistant,
+          content_type: "text",
+          content: %{"text" => cancellation_text},
+          timestamp: DateTime.utc_now()
+        }
+      end
+
+    # Note: We do NOT persist agent state after cancellation because the state
+    # may be in an inconsistent/incomplete state after the task was brutally killed
+
+    {:noreply,
+     socket
+     |> assign(:loading, false)
+     |> assign(:agent_status, :cancelled)
+     |> assign(:streaming_delta, nil)
+     |> stream_insert(:messages, cancellation_message)
+     |> push_event("scroll-to-bottom", %{})
      |> assign_filesystem_files()}
   end
 
@@ -446,12 +555,41 @@ defmodule AgentsDemoWeb.ChatLive do
           inspect(other)
       end
 
-    error_message = %{
-      id: generate_id(),
-      type: :assistant,
-      content: "Sorry, I encountered an error: #{error_display}",
-      timestamp: DateTime.utc_now()
-    }
+    # Persist error message to database and display it
+    error_text = "Sorry, I encountered an error: #{error_display}"
+
+    error_message =
+      if socket.assigns.conversation_id do
+        # Persist to database
+        case Conversations.append_text_message(
+               socket.assigns.conversation_id,
+               "assistant",
+               error_text
+             ) do
+          {:ok, display_msg} ->
+            display_msg
+
+          {:error, persist_reason} ->
+            Logger.error("Failed to persist error message: #{inspect(persist_reason)}")
+            # Create fallback in-memory message
+            %{
+              id: generate_id(),
+              message_type: :assistant,
+              content_type: "text",
+              content: %{"text" => error_text},
+              timestamp: DateTime.utc_now()
+            }
+        end
+      else
+        # No conversation yet - create in-memory message
+        %{
+          id: generate_id(),
+          message_type: :assistant,
+          content_type: "text",
+          content: %{"text" => error_text},
+          timestamp: DateTime.utc_now()
+        }
+      end
 
     {:noreply,
      socket
@@ -507,9 +645,19 @@ defmodule AgentsDemoWeb.ChatLive do
         {:ok, updated_conversation} ->
           Logger.info("Updated conversation title to: #{new_title}")
 
+          # Build page title from new title
+          page_title =
+            if String.length(new_title) > 60 do
+              truncated = String.slice(new_title, 0, 60)
+              "#{truncated}... - Agents Demo"
+            else
+              "#{new_title} - Agents Demo"
+            end
+
           socket =
             socket
             |> assign(:conversation, updated_conversation)
+            |> assign(:page_title, page_title)
 
           # If thread history is open, update the conversation in the stream
           socket =
@@ -542,22 +690,49 @@ defmodule AgentsDemoWeb.ChatLive do
 
     conversation = Conversations.get_conversation!(scope, conversation_id)
 
-    # Load display messages
+    # Load display messages for UI
     display_messages = Conversations.load_display_messages(conversation_id)
 
-    # Restore agent state if it exists
-    case Conversations.load_agent_state(conversation_id) do
-      {:ok, state_data} ->
-        AgentServer.restore_state(@agent_id, state_data)
+    # IMPORTANT: Agent capabilities come from code, not database!
+    # Create agent using current code (same as for new conversations)
+    {:ok, agent} = AgentsDemo.Agents.Factory.create_demo_agent(agent_id: @agent_id)
 
-      {:error, :not_found} ->
-        # No saved state, fresh start
-        :ok
-    end
+    # Restore conversation state if it exists
+    state =
+      case Conversations.load_agent_state(conversation_id) do
+        {:ok, state_data} ->
+          # State data contains only messages and metadata
+          {:ok, state} = LangChain.Agents.State.from_serialized(state_data["state"])
+          state
+
+        {:error, :not_found} ->
+          # No saved state, fresh start
+          LangChain.Agents.State.new!(agent_id: @agent_id)
+      end
+
+    # Update the running agent with the new agent config and restored state
+    # This replaces the agent's configuration and state atomically
+    :ok = AgentServer.update_agent_and_state(@agent_id, agent, state)
+
+    # Build page title from conversation title
+    page_title =
+      if conversation.title && conversation.title != "" do
+        # Truncate long titles for page title
+        truncated_title = String.slice(conversation.title, 0, 60)
+
+        if String.length(conversation.title) > 60 do
+          "#{truncated_title}... - Agents Demo"
+        else
+          "#{truncated_title} - Agents Demo"
+        end
+      else
+        "Conversation - Agents Demo"
+      end
 
     socket
     |> assign(:conversation, conversation)
     |> assign(:conversation_id, conversation_id)
+    |> assign(:page_title, page_title)
     |> stream(:messages, display_messages, reset: true)
     |> assign(:has_messages, length(display_messages) > 0)
   rescue
@@ -569,11 +744,19 @@ defmodule AgentsDemoWeb.ChatLive do
 
   # Reset to fresh conversation state
   defp reset_conversation_state(socket) do
-    AgentServer.reset(@agent_id)
+    # Create fresh agent from current code
+    {:ok, agent} = AgentsDemo.Agents.Factory.create_demo_agent(agent_id: @agent_id)
+
+    # Create fresh state
+    state = LangChain.Agents.State.new!(agent_id: @agent_id)
+
+    # Update agent server
+    :ok = AgentServer.update_agent_and_state(@agent_id, agent, state)
 
     socket
     |> assign(:conversation, nil)
     |> assign(:conversation_id, nil)
+    |> assign(:page_title, "Agents Demo")
     |> stream(:messages, [], reset: true)
     |> assign(:has_messages, false)
   end
@@ -634,6 +817,7 @@ defmodule AgentsDemoWeb.ChatLive do
           socket
           |> assign(:conversation, conversation)
           |> assign(:conversation_id, conversation.id)
+          |> assign(:page_title, "New Conversation - Agents Demo")
           |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
 
         # If thread history is open, insert the new conversation at the top of the list
