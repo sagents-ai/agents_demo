@@ -645,6 +645,21 @@ defmodule AgentsDemoWeb.ChatLive do
         {:ok, updated_conversation} ->
           Logger.info("Updated conversation title to: #{new_title}")
 
+          # Persist the agent state now that the title is in metadata
+          state_data = AgentServer.export_state(@agent_id)
+
+          case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
+            {:ok, _} ->
+              Logger.debug(
+                "Persisted agent state with title metadata for conversation #{socket.assigns.conversation_id}"
+              )
+
+            {:error, reason} ->
+              Logger.error(
+                "Failed to persist agent state after title generation: #{inspect(reason)}"
+              )
+          end
+
           # Build page title from new title
           page_title =
             if String.length(new_title) > 60 do
@@ -692,6 +707,7 @@ defmodule AgentsDemoWeb.ChatLive do
 
     # Load display messages for UI
     display_messages = Conversations.load_display_messages(conversation_id)
+    has_messages = !Enum.empty?(display_messages)
 
     # IMPORTANT: Agent capabilities come from code, not database!
     # Create agent using current code (same as for new conversations)
@@ -702,7 +718,8 @@ defmodule AgentsDemoWeb.ChatLive do
       case Conversations.load_agent_state(conversation_id) do
         {:ok, state_data} ->
           # State data contains only messages and metadata
-          {:ok, state} = LangChain.Agents.State.from_serialized(state_data["state"])
+          # agent_id is NOT serialized, so we provide it when deserializing
+          {:ok, state} = LangChain.Agents.State.from_serialized(@agent_id, state_data["state"])
           state
 
         {:error, :not_found} ->
@@ -734,7 +751,9 @@ defmodule AgentsDemoWeb.ChatLive do
     |> assign(:conversation_id, conversation_id)
     |> assign(:page_title, page_title)
     |> stream(:messages, display_messages, reset: true)
-    |> assign(:has_messages, length(display_messages) > 0)
+    |> assign(:has_messages, has_messages)
+    # Scroll to bottom when loading conversation
+    |> push_event("scroll-to-bottom", %{})
   rescue
     Ecto.NoResultsError ->
       socket
@@ -748,7 +767,7 @@ defmodule AgentsDemoWeb.ChatLive do
     {:ok, agent} = AgentsDemo.Agents.Factory.create_demo_agent(agent_id: @agent_id)
 
     # Create fresh state
-    state = LangChain.Agents.State.new!(agent_id: @agent_id)
+    state = LangChain.Agents.State.new!()
 
     # Update agent server
     :ok = AgentServer.update_agent_and_state(@agent_id, agent, state)
