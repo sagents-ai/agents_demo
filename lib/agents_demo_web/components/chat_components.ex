@@ -515,20 +515,36 @@ defmodule AgentsDemoWeb.ChatComponents do
   # Component: Individual Message
   # Expects a DisplayMessage struct
   def message(assigns) do
-    # Extract text content from DisplayMessage JSONB content field
-    content_text = get_in(assigns.message.content, ["text"]) || ""
-    is_thinking = assigns.message.content_type == "thinking"
-
-    assigns =
-      assigns
-      |> assign(:content_text, content_text)
-      |> assign(:is_thinking, is_thinking)
-
+    # Route to appropriate component based on content_type
     ~H"""
-    <%= if @is_thinking do %>
-      <.thinking_display class="ml-14" message_id={@message.id} content_text={@content_text} />
-    <% else %>
-      <.text_message message={@message} content_text={@content_text} />
+    <%= case @message.content_type do %>
+      <% "thinking" -> %>
+        <.thinking_display
+          class="ml-14"
+          message_id={@message.id}
+          content_text={get_in(@message.content, ["text"]) || ""}
+        />
+
+      <% "tool_call" -> %>
+        <.tool_call_display
+          call_id={get_in(@message.content, ["call_id"])}
+          name={get_in(@message.content, ["name"])}
+          arguments={get_in(@message.content, ["arguments"])}
+        />
+
+      <% "tool_result" -> %>
+        <.tool_result_display
+          tool_call_id={get_in(@message.content, ["tool_call_id"])}
+          name={get_in(@message.content, ["name"])}
+          content={get_in(@message.content, ["content"])}
+          is_error={get_in(@message.content, ["is_error"]) || false}
+        />
+
+      <% _other -> %>
+        <.text_message
+          message={@message}
+          content_text={get_in(@message.content, ["text"]) || ""}
+        />
     <% end %>
     """
   end
@@ -616,65 +632,72 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
-  attr :tool_call, :any, required: true
+  attr :call_id, :string, required: true
+  attr :name, :string, required: true
+  attr :arguments, :any, required: true
 
-  # Component: Tool Call Display
-  def tool_call_item(assigns) do
+  # Component: Tool Call Display (for DisplayMessage content)
+  def tool_call_display(assigns) do
     # Format arguments as JSON string for display
-    assigns = assign(assigns, :args_json, format_tool_arguments(assigns.tool_call.arguments))
+    assigns = assign(assigns, :args_json, format_tool_arguments(assigns.arguments))
 
     ~H"""
-    <div class="bg-[var(--color-background)] border border-[var(--color-border)] rounded-lg p-3">
-      <div class="flex items-center gap-2 mb-2">
-        <.icon name="hero-wrench-screwdriver" class="w-4 h-4 text-[var(--color-primary)]" />
-        <span class="text-sm font-semibold text-[var(--color-text-primary)]">
-          Tool Call: {@tool_call.name}
-        </span>
-      </div>
-      <%= if @args_json && @args_json != "{}" do %>
-        <div class="mt-2 pl-6">
-          <details class="text-xs">
-            <summary class="cursor-pointer text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
-              Arguments
-            </summary>
-            <pre class="mt-2 p-2 bg-[var(--color-surface)] rounded text-[var(--color-text-secondary)] overflow-x-auto"><code>{@args_json}</code></pre>
-          </details>
+    <div class="ml-14">
+      <div class="bg-[var(--color-background)] border border-[var(--color-border)] rounded-lg p-3">
+        <div class="flex items-center gap-2 mb-2">
+          <.icon name="hero-wrench-screwdriver" class="w-4 h-4 text-[var(--color-primary)]" />
+          <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+            Tool Call: {@name}
+          </span>
         </div>
-      <% end %>
+        <%= if @args_json && @args_json != "{}" do %>
+          <div class="mt-2 pl-6">
+            <details class="text-xs">
+              <summary class="cursor-pointer text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
+                Arguments
+              </summary>
+              <pre class="mt-2 p-2 bg-[var(--color-surface)] rounded text-[var(--color-text-secondary)] overflow-x-auto"><code>{@args_json}</code></pre>
+            </details>
+          </div>
+        <% end %>
+      </div>
     </div>
     """
   end
 
-  attr :tool_result, :any, required: true
+  attr :tool_call_id, :string, required: true
+  attr :name, :string, required: true
+  attr :content, :string, required: true
+  attr :is_error, :boolean, default: false
 
-  # Component: Tool Result Display
-  def tool_result_item(assigns) do
-    assigns = assign(assigns, :is_error, is_tool_error(assigns.tool_result))
-
+  # Component: Tool Result Display (for DisplayMessage content)
+  def tool_result_display(assigns) do
     ~H"""
-    <div class={[
-      "border rounded-lg p-3",
-      @is_error && "bg-red-50 border-red-200",
-      !@is_error && "bg-[var(--color-surface)] border-[var(--color-border)]"
-    ]}>
-      <div class="flex items-center gap-2 mb-2">
-        <.icon
-          name={if @is_error, do: "hero-exclamation-triangle", else: "hero-check-circle"}
-          class={if @is_error, do: "w-4 h-4 text-red-600", else: "w-4 h-4 text-green-600"}
-        />
-        <span class="text-sm font-semibold text-[var(--color-text-primary)]">
-          Tool Result: {@tool_result.name}
-        </span>
-      </div>
-      <div class="pl-6 text-[var(--color-text-secondary)]">
-        <details class="text-xs">
-          <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
-            Response
-          </summary>
-          <div class="mt-2 p-2 bg-[var(--color-background)] rounded">
-            {format_tool_result_content(@tool_result.content)}
-          </div>
-        </details>
+    <div class="ml-14">
+      <div class={[
+        "border rounded-lg p-3",
+        @is_error && "bg-red-50 border-red-200",
+        !@is_error && "bg-[var(--color-surface)] border-[var(--color-border)]"
+      ]}>
+        <div class="flex items-center gap-2 mb-2">
+          <.icon
+            name={if @is_error, do: "hero-exclamation-triangle", else: "hero-check-circle"}
+            class={if @is_error, do: "w-4 h-4 text-red-600", else: "w-4 h-4 text-green-600"}
+          />
+          <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+            Tool Result: {@name}
+          </span>
+        </div>
+        <div class="pl-6 text-[var(--color-text-secondary)]">
+          <details class="text-xs">
+            <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
+              Response
+            </summary>
+            <div class="mt-2 p-2 bg-[var(--color-background)] rounded">
+              {format_tool_result_content(@content)}
+            </div>
+          </details>
+        </div>
       </div>
     </div>
     """
