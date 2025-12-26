@@ -729,11 +729,6 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   defp format_tool_result_content(content), do: inspect(content)
 
-  # Helper function to determine if a tool result is an error
-  defp is_tool_error(%{is_error: true}), do: true
-  defp is_tool_error(%{status: :error}), do: true
-  defp is_tool_error(_), do: false
-
   attr :streaming_delta, :any, required: true
 
   # Component: Streaming Message (being typed)
