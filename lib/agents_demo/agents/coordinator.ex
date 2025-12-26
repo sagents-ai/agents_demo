@@ -30,31 +30,42 @@ defmodule AgentsDemo.Agents.Coordinator do
   alias LangChain.Agents.{State, AgentServer, AgentSupervisor}
   alias AgentsDemo.{Conversations, Agents.Factory}
 
+  require Logger
+
   @doc """
   Start an agent session for a conversation.
 
   Creates the agent, loads/creates state, and starts the AgentServer.
   This is the recommended entry point for conversation-based agent sessions.
 
+  This function is idempotent - calling it multiple times for the same
+  conversation returns the same session without error.
+
   ## Options
 
   - `:interrupt_on` - Map of tool names to interrupt configuration
   - `:user` - Current user struct (for audit/permissions)
+  - `:persistence_configs` - List of FileSystemConfig structs for persistent storage (optional)
+  - `:inactivity_timeout` - Timeout in milliseconds for automatic shutdown (optional, default: 1 hour)
 
   ## Returns
 
   - `{:ok, session}` - Session info with agent_id and server_pid
-  - `{:already_started, session}` - Agent already running (idempotent)
   - `{:error, reason}` - Failed to start
 
   ## Examples
 
-      # Start new conversation agent
+      # Start new conversation agent (in-memory only)
       {:ok, session} = Coordinator.start_conversation_session(123)
       # => %{agent_id: "conversation-123", pid: #PID<...>, conversation_id: 123}
 
-      # Already running? No-op
-      {:already_started, session} = Coordinator.start_conversation_session(123)
+      # With persistent storage
+      {:ok, config} = FileSystemConfig.new(%{base_directory: "Memories", ...})
+      {:ok, session} = Coordinator.start_conversation_session(123, persistence_configs: [config])
+
+      # Already running? Returns same session
+      {:ok, session} = Coordinator.start_conversation_session(123)
+      # => %{agent_id: "conversation-123", pid: #PID<...>, conversation_id: 123}
   """
   def start_conversation_session(conversation_id, opts \\ []) do
     agent_id = conversation_agent_id(conversation_id)
@@ -64,7 +75,7 @@ defmodule AgentsDemo.Agents.Coordinator do
         do_start_session(conversation_id, agent_id, opts)
 
       pid ->
-        {:already_started,
+        {:ok,
          %{
            agent_id: agent_id,
            pid: pid,
@@ -126,7 +137,17 @@ defmodule AgentsDemo.Agents.Coordinator do
     case Conversations.load_agent_state(conversation_id) do
       {:ok, state_data} ->
         # Deserialize with proper agent_id (agent_id is not serialized)
-        State.from_serialized(agent_id, state_data["state"])
+        case State.from_serialized(agent_id, state_data) do
+          {:ok, state} ->
+            {:ok, state}
+
+          {:error, reason} ->
+            Logger.warning(
+              "Failed to deserialize agent state for conversation #{conversation_id}: #{inspect(reason)}, using fresh state"
+            )
+
+            {:ok, State.new!(%{})}
+        end
 
       {:error, :not_found} ->
         # Create fresh state - library will inject agent_id automatically
@@ -143,18 +164,31 @@ defmodule AgentsDemo.Agents.Coordinator do
     # 2. Load or create state (data from database)
     {:ok, state} = create_conversation_state(conversation_id)
 
-    # 3. Start the AgentSupervisor with proper configuration
+    # 3. Extract configuration from options
+    persistence_configs = Keyword.get(opts, :persistence_configs, [])
+    inactivity_timeout = Keyword.get(opts, :inactivity_timeout, :timer.hours(1))
+
+    # 4. Start the AgentSupervisor with proper configuration
+    # Use start_link_sync to ensure AgentServer is ready before returning
+    # This prevents race conditions where subscribers try to connect before the agent is ready
     supervisor_config = [
       agent: agent,
       initial_state: state,
       pubsub: {Phoenix.PubSub, AgentsDemo.PubSub},
-      # Conversations can timeout after inactivity
-      inactivity_timeout: :timer.hours(1)
+      inactivity_timeout: inactivity_timeout
     ]
 
-    case AgentSupervisor.start_link(supervisor_config) do
+    # Add persistence configs if provided
+    supervisor_config =
+      if persistence_configs != [] do
+        Keyword.put(supervisor_config, :persistence_configs, persistence_configs)
+      else
+        supervisor_config
+      end
+
+    case AgentSupervisor.start_link_sync(supervisor_config) do
       {:ok, _supervisor_pid} ->
-        # Get the AgentServer pid for convenience
+        # AgentServer is guaranteed to be ready now
         pid = AgentServer.get_pid(agent_id)
 
         {:ok,
@@ -166,9 +200,10 @@ defmodule AgentsDemo.Agents.Coordinator do
 
       {:error, {:already_started, _supervisor_pid}} ->
         # Race condition - someone else started it
+        # Return :ok tuple for consistent API (idempotent)
         pid = AgentServer.get_pid(agent_id)
 
-        {:already_started,
+        {:ok,
          %{
            agent_id: agent_id,
            pid: pid,
