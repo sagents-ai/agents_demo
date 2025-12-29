@@ -13,21 +13,30 @@ defmodule AgentsDemoWeb.ChatLive do
   alias LangChain.MessageDelta
   alias AgentsDemo.Conversations
   alias AgentsDemo.Conversations.DisplayMessage
-
-  @agent_id "demo-agent-001"
+  alias AgentsDemo.Agents.Coordinator
+  alias AgentsDemo.Agents.DemoSetup
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      case AgentServer.subscribe(@agent_id) do
-        :ok ->
-          Logger.info("Subscribed to AgentServer for agent #{@agent_id}")
+    # Start user's filesystem when they log in
+    # Filesystem runs independently of conversations and survives across sessions
+    user_id = socket.assigns.current_scope.user.id
+
+    filesystem_scope =
+      case DemoSetup.ensure_user_filesystem(user_id) do
+        {:ok, fs_scope} ->
+          fs_scope
+
+        {:error, :supervisor_not_ready} ->
+          Logger.debug("FileSystemSupervisor not available - filesystem features disabled")
+          nil
 
         {:error, reason} ->
-          Logger.error("Failed to subscribe to AgentServer: #{inspect(reason)}")
+          Logger.warning("Failed to start user filesystem: #{inspect(reason)}")
+          nil
       end
-    end
 
+    # For new conversations, agent_id will be set when conversation is created
     {:ok,
      socket
      |> stream(:messages, [])
@@ -37,6 +46,8 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:thread_id, nil)
      |> assign(:conversation, nil)
      |> assign(:conversation_id, nil)
+     |> assign(:agent_id, nil)
+     |> assign(:filesystem_scope, filesystem_scope)
      |> assign(:todos, [])
      |> assign_filesystem_files()
      |> assign(:sidebar_collapsed, false)
@@ -106,7 +117,7 @@ defmodule AgentsDemoWeb.ChatLive do
           langchain_message = Message.new_user!(message_text)
 
           # Add message to AgentServer and execute
-          case AgentServer.add_message(@agent_id, langchain_message) do
+          case AgentServer.add_message(socket.assigns.agent_id, langchain_message) do
             :ok ->
               Logger.info("Agent execution started")
 
@@ -141,7 +152,7 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("cancel_agent", _params, socket) do
     Logger.info("User requested to cancel agent execution")
 
-    case AgentServer.cancel(@agent_id) do
+    case AgentServer.cancel(socket.assigns.agent_id) do
       :ok ->
         # The cancellation message will be created when we receive the
         # {:status_changed, :cancelled, nil} event from AgentServer
@@ -165,13 +176,19 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("new_thread", _params, socket) do
-    :ok = AgentServer.reset(@agent_id)
+    # Unsubscribe from current agent if any
+    if socket.assigns[:agent_id] do
+      AgentServer.unsubscribe(socket.assigns.agent_id)
+    end
 
     {:noreply,
      socket
      |> assign(:conversation, nil)
      |> assign(:conversation_id, nil)
+     |> assign(:agent_id, nil)
      |> assign(:page_title, "Agents Demo")
+     |> assign(:agent_status, :idle)
+     |> assign(:loading, false)
      |> stream(:messages, [], reset: true)
      |> assign(:has_messages, false)
      |> assign(:selected_sub_agent, nil)
@@ -259,10 +276,10 @@ defmodule AgentsDemoWeb.ChatLive do
     ]
 
     # Set TODOs and messages on the AgentServer
-    # The existing PubSub handlers will update the UI
-    with :ok <- AgentServer.set_todos(@agent_id, todos),
-         :ok <- AgentServer.set_messages(@agent_id, messages) do
-      Logger.info("Demo data (TODOs and messages) set successfully")
+    # The existing PubSub handlers will update the UI and persist tool_calls/results as DisplayMessages
+    with :ok <- AgentServer.set_todos(socket.assigns.agent_id, todos),
+         :ok <- AgentServer.set_messages(socket.assigns.agent_id, messages) do
+      Logger.info("Demo data set successfully - tool_calls and tool_results will be persisted as DisplayMessages")
       {:noreply, socket}
     else
       {:error, reason} ->
@@ -278,7 +295,14 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("view_file", %{"path" => path}, socket) do
-    case FileSystemServer.read_file(@agent_id, path) do
+    result =
+      if socket.assigns.filesystem_scope do
+        FileSystemServer.read_file_by_scope(socket.assigns.filesystem_scope, path)
+      else
+        {:error, :no_filesystem}
+      end
+
+    case result do
       {:ok, content} ->
         {:noreply,
          socket
@@ -386,7 +410,7 @@ defmodule AgentsDemoWeb.ChatLive do
     Logger.debug("Decision: #{inspect(decisions)}")
 
     # Resume the agent with the decision for just this tool
-    case AgentServer.resume(@agent_id, decisions) do
+    case AgentServer.resume(socket.assigns.agent_id, decisions) do
       :ok ->
         {:noreply,
          socket
@@ -417,7 +441,7 @@ defmodule AgentsDemoWeb.ChatLive do
     Logger.debug("Decision: #{inspect(decisions)}")
 
     # Resume the agent with the decision for just this tool
-    case AgentServer.resume(@agent_id, decisions) do
+    case AgentServer.resume(socket.assigns.agent_id, decisions) do
       :ok ->
         {:noreply,
          socket
@@ -447,7 +471,7 @@ defmodule AgentsDemoWeb.ChatLive do
     # Persist agent state after successful completion
     if socket.assigns.conversation_id do
       try do
-        state_data = AgentServer.export_state(@agent_id)
+        state_data = AgentServer.export_state(socket.assigns.agent_id)
 
         case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
           {:ok, _} ->
@@ -639,14 +663,14 @@ defmodule AgentsDemoWeb.ChatLive do
   @impl true
   def handle_info({:conversation_title_generated, new_title, agent_id}, socket) do
     # Verify this is for our agent and we have a current conversation
-    if agent_id == @agent_id && socket.assigns.conversation do
+    if agent_id == socket.assigns.agent_id && socket.assigns.conversation do
       # Update database
       case Conversations.update_conversation(socket.assigns.conversation, %{title: new_title}) do
         {:ok, updated_conversation} ->
           Logger.info("Updated conversation title to: #{new_title}")
 
           # Persist the agent state now that the title is in metadata
-          state_data = AgentServer.export_state(@agent_id)
+          state_data = AgentServer.export_state(socket.assigns.agent_id)
 
           case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
             {:ok, _} ->
@@ -699,61 +723,83 @@ defmodule AgentsDemoWeb.ChatLive do
     {:noreply, socket}
   end
 
+  @impl true
+  def terminate(_reason, socket) do
+    # Unsubscribe from PubSub when LiveView terminates
+    if socket.assigns[:agent_id] do
+      AgentServer.unsubscribe(socket.assigns.agent_id)
+    end
+
+    # Note: We don't call Coordinator.stop_conversation_session/1 here
+    # because other tabs/users might still be using the conversation.
+    # The agent will timeout after 1 hour of inactivity (Coordinator config).
+
+    :ok
+  end
+
   # Load conversation from database
   defp load_conversation(socket, conversation_id) do
     scope = socket.assigns.current_scope
 
     conversation = Conversations.get_conversation!(scope, conversation_id)
 
-    # Load display messages for UI
-    display_messages = Conversations.load_display_messages(conversation_id)
-    has_messages = !Enum.empty?(display_messages)
+    # Use filesystem scope from socket (filesystem already running from mount)
+    filesystem_scope = socket.assigns.filesystem_scope
 
-    # IMPORTANT: Agent capabilities come from code, not database!
-    # Create agent using current code (same as for new conversations)
-    {:ok, agent} = AgentsDemo.Agents.Factory.create_demo_agent(agent_id: @agent_id)
+    # Start agent session using Coordinator (idempotent - safe if already running)
+    case Coordinator.start_conversation_session(conversation_id,
+           filesystem_scope: filesystem_scope
+         ) do
+      {:ok, session} ->
+        # Subscribe to agent events
+        if connected?(socket) do
+          case AgentServer.subscribe(session.agent_id) do
+            :ok ->
+              Logger.info("Subscribed to AgentServer for agent #{session.agent_id}")
 
-    # Restore conversation state if it exists
-    state =
-      case Conversations.load_agent_state(conversation_id) do
-        {:ok, state_data} ->
-          # State data contains only messages and metadata
-          # agent_id is NOT serialized, so we provide it when deserializing
-          {:ok, state} = LangChain.Agents.State.from_serialized(@agent_id, state_data["state"])
-          state
-
-        {:error, :not_found} ->
-          # No saved state, fresh start
-          LangChain.Agents.State.new!(agent_id: @agent_id)
-      end
-
-    # Update the running agent with the new agent config and restored state
-    # This replaces the agent's configuration and state atomically
-    :ok = AgentServer.update_agent_and_state(@agent_id, agent, state)
-
-    # Build page title from conversation title
-    page_title =
-      if conversation.title && conversation.title != "" do
-        # Truncate long titles for page title
-        truncated_title = String.slice(conversation.title, 0, 60)
-
-        if String.length(conversation.title) > 60 do
-          "#{truncated_title}... - Agents Demo"
-        else
-          "#{truncated_title} - Agents Demo"
+            {:error, reason} ->
+              Logger.error("Failed to subscribe to AgentServer: #{inspect(reason)}")
+          end
         end
-      else
-        "Conversation - Agents Demo"
-      end
 
-    socket
-    |> assign(:conversation, conversation)
-    |> assign(:conversation_id, conversation_id)
-    |> assign(:page_title, page_title)
-    |> stream(:messages, display_messages, reset: true)
-    |> assign(:has_messages, has_messages)
-    # Scroll to bottom when loading conversation
-    |> push_event("scroll-to-bottom", %{})
+        # Load display messages for UI
+        display_messages = Conversations.load_display_messages(conversation_id)
+        has_messages = !Enum.empty?(display_messages)
+
+        # Build page title from conversation title
+        page_title =
+          if conversation.title && conversation.title != "" do
+            # Truncate long titles for page title
+            truncated_title = String.slice(conversation.title, 0, 60)
+
+            if String.length(conversation.title) > 60 do
+              "#{truncated_title}... - Agents Demo"
+            else
+              "#{truncated_title} - Agents Demo"
+            end
+          else
+            "Conversation - Agents Demo"
+          end
+
+        socket
+        |> assign(:conversation, conversation)
+        |> assign(:conversation_id, conversation_id)
+        |> assign(:agent_id, session.agent_id)
+        |> assign(:page_title, page_title)
+        |> stream(:messages, display_messages, reset: true)
+        |> assign(:has_messages, has_messages)
+        # Scroll to bottom when loading conversation
+        |> push_event("scroll-to-bottom", %{})
+
+      {:error, reason} ->
+        Logger.error(
+          "Failed to start agent session for conversation #{conversation_id}: #{inspect(reason)}"
+        )
+
+        socket
+        |> put_flash(:error, "Failed to load conversation agent: #{inspect(reason)}")
+        |> push_navigate(to: ~p"/chat")
+    end
   rescue
     Ecto.NoResultsError ->
       socket
@@ -763,18 +809,15 @@ defmodule AgentsDemoWeb.ChatLive do
 
   # Reset to fresh conversation state
   defp reset_conversation_state(socket) do
-    # Create fresh agent from current code
-    {:ok, agent} = AgentsDemo.Agents.Factory.create_demo_agent(agent_id: @agent_id)
-
-    # Create fresh state
-    state = LangChain.Agents.State.new!()
-
-    # Update agent server
-    :ok = AgentServer.update_agent_and_state(@agent_id, agent, state)
+    # Unsubscribe from current agent if any
+    if socket.assigns[:agent_id] do
+      AgentServer.unsubscribe(socket.assigns.agent_id)
+    end
 
     socket
     |> assign(:conversation, nil)
     |> assign(:conversation_id, nil)
+    |> assign(:agent_id, nil)
     |> assign(:page_title, "Agents Demo")
     |> stream(:messages, [], reset: true)
     |> assign(:has_messages, false)
@@ -832,24 +875,56 @@ defmodule AgentsDemoWeb.ChatLive do
       {:ok, conversation} ->
         Logger.info("Created new conversation: #{conversation.id}")
 
-        socket =
-          socket
-          |> assign(:conversation, conversation)
-          |> assign(:conversation_id, conversation.id)
-          |> assign(:page_title, "New Conversation - Agents Demo")
-          |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
+        # Use filesystem scope from socket (filesystem already running from mount)
+        filesystem_scope = socket.assigns.filesystem_scope
 
-        # If thread history is open, insert the new conversation at the top of the list
-        socket =
-          if socket.assigns.is_thread_history_open do
-            socket
-            |> stream_insert(:conversation_list, conversation, at: 0)
-            |> assign(:has_conversations, true)
-          else
-            socket
-          end
+        # Start agent session using Coordinator with demo configuration
+        case Coordinator.start_conversation_session(conversation.id,
+               filesystem_scope: filesystem_scope
+             ) do
+          {:ok, session} ->
+            # Subscribe to agent events
+            if connected?(socket) do
+              case AgentServer.subscribe(session.agent_id) do
+                :ok ->
+                  Logger.info("Subscribed to AgentServer for agent #{session.agent_id}")
 
-        socket
+                {:error, reason} ->
+                  Logger.error("Failed to subscribe to AgentServer: #{inspect(reason)}")
+              end
+            end
+
+            socket =
+              socket
+              |> assign(:conversation, conversation)
+              |> assign(:conversation_id, conversation.id)
+              |> assign(:agent_id, session.agent_id)
+              |> assign(:page_title, "New Conversation - Agents Demo")
+              |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
+
+            # If thread history is open, insert the new conversation at the top of the list
+            socket =
+              if socket.assigns.is_thread_history_open do
+                socket
+                |> stream_insert(:conversation_list, conversation, at: 0)
+                |> assign(:has_conversations, true)
+              else
+                socket
+              end
+
+            socket
+
+          {:error, reason} ->
+            Logger.error("Failed to start agent session: #{inspect(reason)}")
+
+            # Still set conversation_id so messages can be persisted
+            socket
+            |> assign(:conversation, conversation)
+            |> assign(:conversation_id, conversation.id)
+            |> assign(:page_title, "New Conversation - Agents Demo")
+            |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
+            |> put_flash(:error, "Failed to start agent session: #{inspect(reason)}")
+        end
 
       {:error, changeset} ->
         Logger.error("Failed to create conversation: #{inspect(changeset)}")
@@ -918,45 +993,96 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   # Extract content parts from Message struct
-  # Returns a list of {type, content} tuples, e.g. [{:thinking, "..."}, {:text, "..."}]
-  defp extract_message_content_parts(%Message{content: content}) when is_binary(content) do
-    [{:text, content}]
-  end
+  # Returns a list of {type, data} tuples that need to be persisted
+  # Types: :text, :thinking, :tool_calls, :tool_results
+  defp extract_message_content_parts(%Message{} = message) do
+    parts = []
 
-  defp extract_message_content_parts(%Message{content: content}) when is_list(content) do
-    # Handle list of ContentPart structs - extract both thinking and text
-    content
-    |> Enum.filter(fn part -> part.type in [:thinking, :text] end)
-    |> Enum.map(fn part -> {part.type, part.content} end)
-    |> Enum.reject(fn {_type, content} -> is_nil(content) or content == "" end)
-  end
+    # Extract text/thinking content if present
+    parts =
+      case message.content do
+        content when is_binary(content) and content != "" ->
+          parts ++ [{:text, content}]
 
-  defp extract_message_content_parts(_), do: []
+        content when is_list(content) ->
+          text_thinking_parts =
+            content
+            |> Enum.filter(fn part -> part.type in [:thinking, :text] end)
+            |> Enum.map(fn part -> {part.type, part.content} end)
+            |> Enum.reject(fn {_type, content} -> is_nil(content) or content == "" end)
+
+          parts ++ text_thinking_parts
+
+        _ ->
+          parts
+      end
+
+    # Extract tool_calls if present (assistant messages)
+    parts =
+      case message.tool_calls do
+        tool_calls when is_list(tool_calls) and tool_calls != [] ->
+          parts ++ [{:tool_calls, tool_calls}]
+
+        _ ->
+          parts
+      end
+
+    # Extract tool_results if present (tool messages)
+    parts =
+      case message.tool_results do
+        tool_results when is_list(tool_results) and tool_results != [] ->
+          parts ++ [{:tool_results, tool_results}]
+
+        _ ->
+          parts
+      end
+
+    parts
+  end
 
   # Persist content parts to database, returning list of DisplayMessage structs
   defp persist_content_parts(conversation_id, content_parts) do
     content_parts
-    |> Enum.with_index()
-    |> Enum.map(fn {{type, content}, _index} ->
+    |> Enum.flat_map(fn {type, data} ->
       case type do
         :thinking ->
-          case Conversations.append_thinking_message(conversation_id, content) do
-            {:ok, msg} ->
-              msg
-
+          case Conversations.append_thinking_message(conversation_id, data) do
+            {:ok, msg} -> [msg]
             {:error, reason} ->
               Logger.error("Failed to persist thinking message: #{inspect(reason)}")
-              create_fallback_message(conversation_id, type, content)
+              [create_fallback_message(conversation_id, type, data)]
           end
 
         :text ->
-          case Conversations.append_text_message(conversation_id, "assistant", content) do
-            {:ok, msg} ->
-              msg
-
+          case Conversations.append_text_message(conversation_id, "assistant", data) do
+            {:ok, msg} -> [msg]
             {:error, reason} ->
               Logger.error("Failed to persist text message: #{inspect(reason)}")
-              create_fallback_message(conversation_id, type, content)
+              [create_fallback_message(conversation_id, type, data)]
+          end
+
+        # NEW: Handle tool_calls (list of ToolCall structs)
+        :tool_calls ->
+          case Conversations.append_tool_calls_batch(conversation_id, data) do
+            {:ok, msgs} -> msgs
+            {:error, reason} ->
+              Logger.error("Failed to persist tool calls: #{inspect(reason)}")
+              # Create fallback messages for each tool call
+              Enum.map(data, fn tool_call ->
+                create_fallback_tool_call_message(conversation_id, tool_call)
+              end)
+          end
+
+        # NEW: Handle tool_results (list of ToolResult structs)
+        :tool_results ->
+          case Conversations.append_tool_results_batch(conversation_id, data) do
+            {:ok, msgs} -> msgs
+            {:error, reason} ->
+              Logger.error("Failed to persist tool results: #{inspect(reason)}")
+              # Create fallback messages for each tool result
+              Enum.map(data, fn tool_result ->
+                create_fallback_tool_result_message(conversation_id, tool_result)
+              end)
           end
       end
     end)
@@ -965,9 +1091,23 @@ defmodule AgentsDemoWeb.ChatLive do
   # Create in-memory messages when no conversation exists
   defp create_in_memory_messages(content_parts, conversation_id) do
     content_parts
-    |> Enum.with_index()
-    |> Enum.map(fn {{type, content}, _index} ->
-      create_fallback_message(conversation_id, type, content)
+    |> Enum.flat_map(fn {type, data} ->
+      case type do
+        :thinking -> [create_fallback_message(conversation_id, type, data)]
+        :text -> [create_fallback_message(conversation_id, type, data)]
+
+        # NEW: Handle tool_calls
+        :tool_calls ->
+          Enum.map(data, fn tool_call ->
+            create_fallback_tool_call_message(conversation_id, tool_call)
+          end)
+
+        # NEW: Handle tool_results
+        :tool_results ->
+          Enum.map(data, fn tool_result ->
+            create_fallback_tool_result_message(conversation_id, tool_result)
+          end)
+      end
     end)
   end
 
@@ -989,34 +1129,59 @@ defmodule AgentsDemoWeb.ChatLive do
     }
   end
 
+  # Create a fallback in-memory DisplayMessage for a tool call
+  defp create_fallback_tool_call_message(conversation_id, tool_call) do
+    %DisplayMessage{
+      id: Ecto.UUID.generate(),
+      conversation_id: conversation_id,
+      message_type: "assistant",
+      content_type: "tool_call",
+      content: %{
+        "call_id" => tool_call.call_id,
+        "name" => tool_call.name,
+        "arguments" => tool_call.arguments
+      },
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
+  # Create a fallback in-memory DisplayMessage for a tool result
+  defp create_fallback_tool_result_message(conversation_id, tool_result) do
+    %DisplayMessage{
+      id: Ecto.UUID.generate(),
+      conversation_id: conversation_id,
+      message_type: "tool",
+      content_type: "tool_result",
+      content: %{
+        "tool_call_id" => tool_result.tool_call_id,
+        "name" => tool_result.name,
+        "content" => tool_result.content,
+        "is_error" => tool_result.is_error
+      },
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
   defp assign_filesystem_files(socket) do
-    try do
-      # Get all file paths from the FileSystemServer
-      file_paths = FileSystemServer.list_files(@agent_id)
+    # Convert to a map of path => %{type: :file, directory: virtual_dir}
+    files =
+      socket.assigns[:filesystem_scope]
+      |> FileSystemServer.list_files_by_scope()
+      |> Enum.map(fn path ->
+        # Extract directory information
+        directory =
+          path
+          |> Path.dirname()
+          |> case do
+            "/" -> "Root"
+            dir -> dir
+          end
 
-      # Convert to a map of path => %{type: :file, directory: virtual_dir}
-      files =
-        file_paths
-        |> Enum.map(fn path ->
-          # Extract directory information
-          directory =
-            path
-            |> Path.dirname()
-            |> case do
-              "/" -> "Root"
-              dir -> dir
-            end
+        {path, %{type: :file, directory: directory}}
+      end)
+      |> Enum.into(%{})
 
-          {path, %{type: :file, directory: directory}}
-        end)
-        |> Enum.into(%{})
-
-      assign(socket, :files, files)
-    rescue
-      _ ->
-        # If FileSystemServer isn't available yet, return empty map
-        assign(socket, :files, %{})
-    end
+    assign(socket, :files, files)
   end
 
   @impl true

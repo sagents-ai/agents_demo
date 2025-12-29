@@ -32,6 +32,8 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   require Logger
 
+  @inactivity_timeout_minutes 10
+
   @doc """
   Start an agent session for a conversation.
 
@@ -45,7 +47,7 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   - `:interrupt_on` - Map of tool names to interrupt configuration
   - `:user` - Current user struct (for audit/permissions)
-  - `:persistence_configs` - List of FileSystemConfig structs for persistent storage (optional)
+  - `:filesystem_scope` - Scope tuple for filesystem reference (e.g., {:user, 123}) (optional)
   - `:inactivity_timeout` - Timeout in milliseconds for automatic shutdown (optional, default: 1 hour)
 
   ## Returns
@@ -59,9 +61,9 @@ defmodule AgentsDemo.Agents.Coordinator do
       {:ok, session} = Coordinator.start_conversation_session(123)
       # => %{agent_id: "conversation-123", pid: #PID<...>, conversation_id: 123}
 
-      # With persistent storage
-      {:ok, config} = FileSystemConfig.new(%{base_directory: "Memories", ...})
-      {:ok, session} = Coordinator.start_conversation_session(123, persistence_configs: [config])
+      # With filesystem scope (references independently-running filesystem)
+      {:ok, scope} = DemoSetup.ensure_user_filesystem(user_id)
+      {:ok, session} = Coordinator.start_conversation_session(123, filesystem_scope: scope)
 
       # Already running? Returns same session
       {:ok, session} = Coordinator.start_conversation_session(123)
@@ -158,33 +160,40 @@ defmodule AgentsDemo.Agents.Coordinator do
   ## Private Functions
 
   defp do_start_session(conversation_id, agent_id, opts) do
-    # 1. Create agent from factory (configuration from code)
-    {:ok, agent} = Factory.create_demo_agent(Keyword.put(opts, :agent_id, agent_id))
+    Logger.info("Starting agent session for conversation #{conversation_id}")
 
-    # 2. Load or create state (data from database)
+    # 1. Extract filesystem_scope from options
+    filesystem_scope = Keyword.get(opts, :filesystem_scope)
+
+    # 2. Create agent from factory (configuration from code) with filesystem_scope
+    factory_opts =
+      opts
+      |> Keyword.put(:agent_id, agent_id)
+      |> Keyword.put(:filesystem_scope, filesystem_scope)
+
+    {:ok, agent} = Factory.create_demo_agent(factory_opts)
+
+    # 3. Load or create state (data from database)
     {:ok, state} = create_conversation_state(conversation_id)
 
-    # 3. Extract configuration from options
-    persistence_configs = Keyword.get(opts, :persistence_configs, [])
-    inactivity_timeout = Keyword.get(opts, :inactivity_timeout, :timer.hours(1))
+    # 4. Extract configuration from options
+    # Default to 10 minutes of inactivity before automatic shutdown
+    inactivity_timeout = Keyword.get(opts, :inactivity_timeout, :timer.minutes(@inactivity_timeout_minutes))
 
-    # 4. Start the AgentSupervisor with proper configuration
+    # 5. Start the AgentSupervisor with proper configuration
     # Use start_link_sync to ensure AgentServer is ready before returning
     # This prevents race conditions where subscribers try to connect before the agent is ready
+    # CRITICAL: Must provide unique name for each supervisor based on agent_id
+    # Without this, all supervisors try to register with the same default name causing collisions
+    supervisor_name = AgentSupervisor.get_name(agent_id)
+
     supervisor_config = [
+      name: supervisor_name,
       agent: agent,
       initial_state: state,
       pubsub: {Phoenix.PubSub, AgentsDemo.PubSub},
       inactivity_timeout: inactivity_timeout
     ]
-
-    # Add persistence configs if provided
-    supervisor_config =
-      if persistence_configs != [] do
-        Keyword.put(supervisor_config, :persistence_configs, persistence_configs)
-      else
-        supervisor_config
-      end
 
     case AgentSupervisor.start_link_sync(supervisor_config) do
       {:ok, _supervisor_pid} ->
@@ -211,6 +220,7 @@ defmodule AgentsDemo.Agents.Coordinator do
          }}
 
       {:error, reason} ->
+        Logger.error("Failed to start agent session: #{inspect(reason)}")
         {:error, reason}
     end
   end

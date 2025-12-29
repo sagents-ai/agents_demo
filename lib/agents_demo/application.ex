@@ -16,6 +16,8 @@ defmodule AgentsDemo.Application do
       # Start the Registry for agent processes
       # Agents start on-demand via Coordinator when conversations are accessed
       {Registry, keys: :unique, name: LangChain.Agents.Registry},
+      # Start the FileSystemSupervisor for managing user filesystems
+      LangChain.Agents.FileSystem.FileSystemSupervisor,
       # Start to serve requests, typically the last entry
       AgentsDemoWeb.Endpoint
     ]
