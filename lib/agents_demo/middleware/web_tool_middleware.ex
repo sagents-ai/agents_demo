@@ -115,28 +115,35 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
   @impl true
   def init(opts) do
     # Required options
-    agent_id = Keyword.fetch!(opts, :agent_id)
-    model = Keyword.fetch!(opts, :model)
+    case {Keyword.fetch(opts, :agent_id), Keyword.fetch(opts, :model)} do
+      {{:ok, agent_id}, {:ok, model}} ->
+        # Build the compiled web lookup subagent
+        web_lookup_agent = build_web_lookup_agent(model)
 
-    # Build the compiled web lookup subagent
-    web_lookup_agent = build_web_lookup_agent(model)
+        compiled_subagent =
+          SubAgent.Compiled.new!(%{
+            name: "web-lookup",
+            description: "Search web, select best source, fetch page, extract information",
+            agent: web_lookup_agent,
+            initial_messages: []
+          })
 
-    compiled_subagent =
-      SubAgent.Compiled.new!(%{
-        name: "web-lookup",
-        description: "Search web, select best source, fetch page, extract information",
-        agent: web_lookup_agent,
-        initial_messages: []
-      })
+        config = %{
+          agent_id: agent_id,
+          model: model,
+          compiled_subagent: compiled_subagent,
+          timeout: Keyword.get(opts, :timeout, @default_timeout)
+        }
 
-    config = %{
-      agent_id: agent_id,
-      model: model,
-      compiled_subagent: compiled_subagent,
-      timeout: Keyword.get(opts, :timeout, @default_timeout)
-    }
+        {:ok, config}
 
-    {:ok, config}
+      {agent_id_result, model_result} ->
+        Logger.error("WebToolMiddleware.init: Missing required options!")
+        Logger.error("  agent_id: #{inspect(agent_id_result)}")
+        Logger.error("  model: #{inspect(model_result)}")
+        Logger.error("  All opts: #{inspect(opts)}")
+        {:error, "WebToolMiddleware requires :agent_id and :model options"}
+    end
   end
 
   @impl true
@@ -241,6 +248,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
     end
   rescue
     e ->
+      Logger.error("WebToolMiddleware: Exception during web_lookup: #{Exception.format(:error, e, __STACKTRACE__)}")
       {:error, "Web lookup failed: #{Exception.message(e)}"}
   end
 

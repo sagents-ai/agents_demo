@@ -297,7 +297,7 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("view_file", %{"path" => path}, socket) do
     result =
       if socket.assigns.filesystem_scope do
-        FileSystemServer.read_file_by_scope(socket.assigns.filesystem_scope, path)
+        FileSystemServer.read_file(socket.assigns.filesystem_scope, path)
       else
         {:error, :no_filesystem}
       end
@@ -1166,7 +1166,7 @@ defmodule AgentsDemoWeb.ChatLive do
     # Convert to a map of path => %{type: :file, directory: virtual_dir}
     files =
       socket.assigns[:filesystem_scope]
-      |> FileSystemServer.list_files_by_scope()
+      |> FileSystemServer.list_files()
       |> Enum.map(fn path ->
         # Extract directory information
         directory =
