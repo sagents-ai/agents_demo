@@ -21,6 +21,11 @@ defmodule AgentsDemoWeb.ChatLive do
     filesystem_scope =
       case DemoSetup.ensure_user_filesystem(user_id) do
         {:ok, fs_scope} ->
+          # Subscribe to filesystem changes for real-time updates
+          if connected?(socket) do
+            FileSystemServer.subscribe(fs_scope)
+          end
+
           fs_scope
 
         {:error, :supervisor_not_ready} ->
@@ -668,6 +673,12 @@ defmodule AgentsDemoWeb.ChatLive do
     else
       {:noreply, socket}
     end
+  end
+
+  @impl true
+  def handle_info({:file_system, {event_type, path}}, socket) do
+    Logger.debug("FileSystem event #{event_type}: #{path}")
+    {:noreply, assign_filesystem_files(socket)}
   end
 
   @impl true
