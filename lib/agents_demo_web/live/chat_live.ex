@@ -6,13 +6,9 @@ defmodule AgentsDemoWeb.ChatLive do
 
   alias LangChain.Agents.AgentServer
   alias LangChain.Agents.FileSystemServer
-  alias LangChain.Agents.Todo
   alias LangChain.Message
-  alias LangChain.Message.ToolCall
-  alias LangChain.Message.ToolResult
   alias LangChain.MessageDelta
   alias AgentsDemo.Conversations
-  alias AgentsDemo.Conversations.DisplayMessage
   alias AgentsDemo.Agents.Coordinator
   alias AgentsDemo.Agents.DemoSetup
 
@@ -77,12 +73,26 @@ defmodule AgentsDemoWeb.ChatLive do
       cond do
         # Load conversation if conversation_id is present and different from current
         conversation_id && conversation_id != previous_conversation_id ->
+          # Untrack presence from previous conversation if connected
+          if connected?(socket) && previous_conversation_id do
+            user_id = socket.assigns.current_scope.user.id
+            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
+            Logger.debug("Untracked presence from conversation #{previous_conversation_id}")
+          end
+
           socket
           |> load_conversation(conversation_id)
           |> update_conversation_selection(previous_conversation_id, conversation_id)
 
         # If no conversation_id in URL, reset to fresh state
         is_nil(conversation_id) && previous_conversation_id ->
+          # Untrack presence when going back to empty state
+          if connected?(socket) do
+            user_id = socket.assigns.current_scope.user.id
+            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
+            Logger.debug("Untracked presence from conversation #{previous_conversation_id}")
+          end
+
           reset_conversation_state(socket)
 
         # No change needed
@@ -110,24 +120,30 @@ defmodule AgentsDemoWeb.ChatLive do
             socket
         end
 
-      # Persist user message to database
-      case persist_user_message(socket.assigns.conversation_id, message_text) do
-        {:ok, display_msg} ->
+      conversation_id = socket.assigns.conversation_id
+      filesystem_scope = socket.assigns.filesystem_scope
+
+      # Ensure agent is running (seamless start if not)
+      # Coordinator.start_conversation_session is idempotent
+      case Coordinator.start_conversation_session(conversation_id,
+             filesystem_scope: filesystem_scope
+           ) do
+        {:ok, session} ->
           # Create LangChain Message
           langchain_message = Message.new_user!(message_text)
 
-          # Add message to AgentServer and execute
-          case AgentServer.add_message(socket.assigns.agent_id, langchain_message) do
+          # Add message to AgentServer (will save and broadcast via PubSub)
+          # (Subscription already active from load_conversation)
+          case AgentServer.add_message(session.agent_id, langchain_message) do
             :ok ->
               Logger.info("Agent execution started")
 
               {:noreply,
                socket
                |> assign(:input, "")
-               |> assign(:loading, true)
-               |> assign(:has_messages, true)
-               |> stream_insert(:messages, display_msg)
-               |> push_event("scroll-to-bottom", %{})}
+               |> assign(:loading, true)}
+              # Note: No stream_insert here!
+              # Display happens when we receive {:display_message_saved, msg} event
 
             {:error, reason} ->
               Logger.error("Failed to execute agent: #{inspect(reason)}")
@@ -139,11 +155,11 @@ defmodule AgentsDemoWeb.ChatLive do
           end
 
         {:error, reason} ->
-          Logger.error("Failed to persist user message: #{inspect(reason)}")
+          Logger.error("Failed to ensure agent running: #{inspect(reason)}")
 
           {:noreply,
            socket
-           |> put_flash(:error, "Failed to save message")}
+           |> put_flash(:error, "Failed to start agent session: #{inspect(reason)}")}
       end
     end
   end
@@ -176,22 +192,29 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("new_thread", _params, socket) do
-    # Unsubscribe from current agent if any
-    if socket.assigns[:agent_id] do
-      AgentServer.unsubscribe(socket.assigns.agent_id)
+    previous_conversation_id = socket.assigns[:conversation_id]
+
+    # Unsubscribe from current conversation if any
+    if previous_conversation_id do
+      :ok = Coordinator.unsubscribe_from_conversation(previous_conversation_id)
     end
+
+    socket =
+      socket
+      |> assign(:conversation, nil)
+      |> assign(:conversation_id, nil)
+      |> assign(:agent_id, nil)
+      |> assign(:page_title, "Agents Demo")
+      |> assign(:agent_status, :idle)
+      |> assign(:loading, false)
+      |> assign(:todos, [])
+      |> stream(:messages, [], reset: true)
+      |> assign(:has_messages, false)
+      |> assign(:selected_sub_agent, nil)
+      |> reset_conversation_in_stream(previous_conversation_id)
 
     {:noreply,
      socket
-     |> assign(:conversation, nil)
-     |> assign(:conversation_id, nil)
-     |> assign(:agent_id, nil)
-     |> assign(:page_title, "Agents Demo")
-     |> assign(:agent_status, :idle)
-     |> assign(:loading, false)
-     |> stream(:messages, [], reset: true)
-     |> assign(:has_messages, false)
-     |> assign(:selected_sub_agent, nil)
      |> push_patch(to: ~p"/chat")
      |> put_flash(:info, "New conversation started")}
   end
@@ -219,73 +242,6 @@ defmodule AgentsDemoWeb.ChatLive do
       end
 
     {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("setup_demo_data", _params, socket) do
-    # Create sample TODO items with different states for testing
-    todos = [
-      Todo.new!(%{content: "Initialize project setup", status: :completed}),
-      Todo.new!(%{content: "Configure API endpoints", status: :in_progress}),
-      Todo.new!(%{content: "Write integration tests", status: :pending}),
-      Todo.new!(%{content: "Deploy to production", status: :pending})
-    ]
-
-    # Create sample messages with different types for testing
-    # Include tool calls and tool results to test UI rendering
-    tool_call_1 =
-      ToolCall.new!(%{
-        call_id: "call_abc123",
-        name: "search_web",
-        arguments: %{"query" => "Oslo attractions in Spring"}
-      })
-
-    tool_result_1 =
-      ToolResult.new!(%{
-        tool_call_id: "call_abc123",
-        name: "search_web",
-        content:
-          "Found 5 top attractions: Vigeland Park, Oslo Opera House, Akershus Fortress, Viking Ship Museum, and the Royal Palace."
-      })
-
-    tool_call_2 =
-      ToolCall.new!(%{
-        call_id: "call_def456",
-        name: "get_weather",
-        arguments: %{"location" => "Oslo", "season" => "Spring"}
-      })
-
-    tool_result_2 =
-      ToolResult.new!(%{
-        tool_call_id: "call_def456",
-        name: "get_weather",
-        content:
-          "Spring weather in Oslo: Average temperature 8-15°C, mild with occasional rain. Best time to visit is late April to May."
-      })
-
-    messages = [
-      Message.new_user!("What sights should I see when I visit Oslo in the Spring?"),
-      Message.new_assistant!(%{
-        content: "Let me search for information about Oslo attractions and the Spring weather.",
-        tool_calls: [tool_call_1, tool_call_2]
-      }),
-      Message.new_tool_result!(%{tool_results: [tool_result_1, tool_result_2]}),
-      Message.new_assistant!(
-        "Based on the search results, here are my top recommendations for visiting Oslo in Spring:\n\n1. **Vigeland Park** - Perfect for spring walks among 200+ sculptures\n2. **Oslo Opera House** - Iconic architecture with rooftop views\n3. **Akershus Fortress** - Medieval castle with harbor views\n4. **Viking Ship Museum** - Explore Norway's Viking heritage\n5. **Royal Palace** - Beautiful palace grounds ideal for spring strolls\n\nSpring is an excellent time to visit with temperatures ranging from 8-15°C. Late April to May offers the best weather with blooming flowers throughout the city!"
-      )
-    ]
-
-    # Set TODOs and messages on the AgentServer
-    # The existing PubSub handlers will update the UI and persist tool_calls/results as DisplayMessages
-    with :ok <- AgentServer.set_todos(socket.assigns.agent_id, todos),
-         :ok <- AgentServer.set_messages(socket.assigns.agent_id, messages) do
-      Logger.info("Demo data set successfully - tool_calls and tool_results will be persisted as DisplayMessages")
-      {:noreply, socket}
-    else
-      {:error, reason} ->
-        Logger.error("Failed to set demo data: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "Failed to set demo data")}
-    end
   end
 
   @impl true
@@ -465,35 +421,17 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:status_changed, :completed, _final_state}, socket) do
-    Logger.info("Agent completed execution")
+  def handle_info({:status_changed, :idle, _data}, socket) do
+    Logger.info("Agent returned to idle state (execution completed)")
 
     # Persist agent state after successful completion
-    if socket.assigns.conversation_id do
-      try do
-        state_data = AgentServer.export_state(socket.assigns.agent_id)
-
-        case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
-          {:ok, _} ->
-            Logger.info(
-              "Persisted agent state for conversation #{socket.assigns.conversation_id}"
-            )
-
-          {:error, reason} ->
-            Logger.error("Failed to persist agent state on completion: #{inspect(reason)}")
-        end
-      rescue
-        error ->
-          Logger.error("Exception while persisting agent state on completion: #{inspect(error)}")
-          Logger.debug("Conversation ID: #{socket.assigns.conversation_id}")
-      end
-    end
+    persist_agent_state(socket, "on_completion")
 
     # Don't create messages here - they should be added via :llm_message and :tool_response handlers
     {:noreply,
      socket
      |> assign(:loading, false)
-     |> assign(:agent_status, :completed)
+     |> assign(:agent_status, :idle)
      |> assign_filesystem_files()}
   end
 
@@ -558,6 +496,9 @@ defmodule AgentsDemoWeb.ChatLive do
     # Extract action_requests (pending tool calls needing approval)
     action_requests = Map.get(interrupt_data, :action_requests, [])
 
+    # Persist agent state to preserve context including the interrupt state
+    persist_agent_state(socket, "on_interrupt")
+
     {:noreply,
      socket
      |> assign(:loading, false)
@@ -615,6 +556,9 @@ defmodule AgentsDemoWeb.ChatLive do
         }
       end
 
+    # Persist agent state to preserve context up to the error
+    persist_agent_state(socket, "on_error")
+
     {:noreply,
      socket
      |> assign(:loading, false)
@@ -640,17 +584,26 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:llm_message, message}, socket) do
-    # Complete message received - finalize display
+  def handle_info({:llm_message, _message}, socket) do
+    # Complete message received - clear streaming state
+    # This event signals that message processing is complete (separate from display)
     Logger.info("Complete LLM message received")
 
-    socket =
-      socket
-      |> finalize_streaming_message(message)
-      |> assign(:loading, false)
-      |> push_event("scroll-to-bottom", %{})
+    {:noreply,
+     socket
+     |> assign(:streaming_delta, nil)
+     |> assign(:loading, false)}
+    # Note: No persistence, no UI update here!
+    # Messages already saved and displayed via {:display_message_saved, msg} events
+  end
 
-    {:noreply, socket}
+  @impl true
+  def handle_info({:display_message_saved, display_msg}, socket) do
+    {:noreply,
+     socket
+     |> assign(:has_messages, true)
+     |> stream_insert(:messages, display_msg)
+     |> push_event("scroll-to-bottom", %{})}
   end
 
   @impl true
@@ -724,15 +677,15 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def terminate(_reason, socket) do
-    # Unsubscribe from PubSub when LiveView terminates
-    if socket.assigns[:agent_id] do
-      AgentServer.unsubscribe(socket.assigns.agent_id)
-    end
+  def terminate(_reason, _socket) do
+    # PubSub subscriptions and Presence tracking are automatically cleaned up
+    # when the LiveView process terminates - no manual cleanup needed
 
     # Note: We don't call Coordinator.stop_conversation_session/1 here
     # because other tabs/users might still be using the conversation.
-    # The agent will timeout after 1 hour of inactivity (Coordinator config).
+    # The agent will shutdown based on:
+    # 1. Presence tracking (if idle with no viewers)
+    # 2. Inactivity timeout (10 minutes by default, as fallback)
 
     :ok
   end
@@ -741,65 +694,67 @@ defmodule AgentsDemoWeb.ChatLive do
   defp load_conversation(socket, conversation_id) do
     scope = socket.assigns.current_scope
 
-    conversation = Conversations.get_conversation!(scope, conversation_id)
-
-    # Use filesystem scope from socket (filesystem already running from mount)
-    filesystem_scope = socket.assigns.filesystem_scope
-
-    # Start agent session using Coordinator (idempotent - safe if already running)
-    case Coordinator.start_conversation_session(conversation_id,
-           filesystem_scope: filesystem_scope
-         ) do
-      {:ok, session} ->
-        # Subscribe to agent events
-        if connected?(socket) do
-          case AgentServer.subscribe(session.agent_id) do
-            :ok ->
-              Logger.info("Subscribed to AgentServer for agent #{session.agent_id}")
-
-            {:error, reason} ->
-              Logger.error("Failed to subscribe to AgentServer: #{inspect(reason)}")
-          end
-        end
-
-        # Load display messages for UI
-        display_messages = Conversations.load_display_messages(conversation_id)
-        has_messages = !Enum.empty?(display_messages)
-
-        # Build page title from conversation title
-        page_title =
-          if conversation.title && conversation.title != "" do
-            # Truncate long titles for page title
-            truncated_title = String.slice(conversation.title, 0, 60)
-
-            if String.length(conversation.title) > 60 do
-              "#{truncated_title}... - Agents Demo"
-            else
-              "#{truncated_title} - Agents Demo"
-            end
-          else
-            "Conversation - Agents Demo"
-          end
-
-        socket
-        |> assign(:conversation, conversation)
-        |> assign(:conversation_id, conversation_id)
-        |> assign(:agent_id, session.agent_id)
-        |> assign(:page_title, page_title)
-        |> stream(:messages, display_messages, reset: true)
-        |> assign(:has_messages, has_messages)
-        # Scroll to bottom when loading conversation
-        |> push_event("scroll-to-bottom", %{})
-
-      {:error, reason} ->
-        Logger.error(
-          "Failed to start agent session for conversation #{conversation_id}: #{inspect(reason)}"
-        )
-
-        socket
-        |> put_flash(:error, "Failed to load conversation agent: #{inspect(reason)}")
-        |> push_navigate(to: ~p"/chat")
+    # Unsubscribe from previous conversation if switching conversations
+    if connected?(socket) && socket.assigns[:conversation_id] &&
+       socket.assigns.conversation_id != conversation_id do
+      :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
+      Logger.debug("Unsubscribed from previous conversation #{socket.assigns.conversation_id}")
     end
+
+    conversation = Conversations.get_conversation!(scope, conversation_id)
+    agent_id = Coordinator.conversation_agent_id(conversation_id)
+
+    # Subscribe to agent events (works even if agent not running!)
+    # Using ensure_* versions - idempotent, safe if user clicks same conversation multiple times
+    if connected?(socket) do
+      :ok = Coordinator.ensure_subscribed_to_conversation(conversation_id)
+      Logger.debug("Ensured subscription to agent events for conversation #{conversation_id}")
+
+      # Track presence - this enables smart agent shutdown
+      user_id = socket.assigns.current_scope.user.id
+      case Coordinator.track_conversation_viewer(conversation_id, user_id, self()) do
+        {:ok, _ref} ->
+          Logger.debug("Tracking presence for conversation #{conversation_id}, user #{user_id}")
+        {:error, {:already_tracked, _, _, _}} ->
+          Logger.debug("Already tracking presence for conversation #{conversation_id}, user #{user_id}")
+        {:error, reason} ->
+          Logger.warning("Failed to track presence: #{inspect(reason)}")
+      end
+    end
+
+    # Load display messages for UI (no agent needed)
+    display_messages = Conversations.load_display_messages(conversation_id)
+    has_messages = !Enum.empty?(display_messages)
+
+    # Load saved TODOs from database (no agent needed)
+    # This shows historical TODOs immediately without starting the agent
+    saved_todos = Conversations.load_todos(conversation_id)
+
+    # Build page title from conversation title
+    page_title =
+      if conversation.title && conversation.title != "" do
+        # Truncate long titles for page title
+        truncated_title = String.slice(conversation.title, 0, 60)
+
+        if String.length(conversation.title) > 60 do
+          "#{truncated_title}... - Agents Demo"
+        else
+          "#{truncated_title} - Agents Demo"
+        end
+      else
+        "Conversation - Agents Demo"
+      end
+
+    socket
+    |> assign(:conversation, conversation)
+    |> assign(:conversation_id, conversation_id)
+    |> assign(:agent_id, agent_id)
+    |> assign(:page_title, page_title)
+    |> assign(:todos, saved_todos)
+    |> stream(:messages, display_messages, reset: true)
+    |> assign(:has_messages, has_messages)
+    # Scroll to bottom when loading conversation
+    |> push_event("scroll-to-bottom", %{})
   rescue
     Ecto.NoResultsError ->
       socket
@@ -809,16 +764,20 @@ defmodule AgentsDemoWeb.ChatLive do
 
   # Reset to fresh conversation state
   defp reset_conversation_state(socket) do
-    # Unsubscribe from current agent if any
-    if socket.assigns[:agent_id] do
-      AgentServer.unsubscribe(socket.assigns.agent_id)
+    # Unsubscribe from current conversation if any
+    if socket.assigns[:conversation_id] do
+      :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
     end
+
+    # Note: Presence tracking is automatically cleaned up when the LiveView process
+    # terminates - no manual cleanup needed
 
     socket
     |> assign(:conversation, nil)
     |> assign(:conversation_id, nil)
     |> assign(:agent_id, nil)
     |> assign(:page_title, "Agents Demo")
+    |> assign(:todos, [])
     |> stream(:messages, [], reset: true)
     |> assign(:has_messages, false)
   end
@@ -827,36 +786,27 @@ defmodule AgentsDemoWeb.ChatLive do
   # This re-inserts both the previous and new conversation items so they re-render
   # with the updated @conversation_id assign, updating the active styling
   defp update_conversation_selection(socket, previous_id, new_id) do
-    scope = socket.assigns.current_scope
+    socket
+    |> reset_conversation_in_stream(previous_id)
+    |> reset_conversation_in_stream(new_id)
+  end
 
-    # Only update if the history sidebar is open and has conversations
-    if socket.assigns.is_thread_history_open && socket.assigns.has_conversations do
-      # Re-insert previous conversation to clear its active state
-      socket =
-        if previous_id do
-          try do
-            prev_conversation = Conversations.get_conversation!(scope, previous_id)
-            stream_insert(socket, :conversation_list, prev_conversation)
-          rescue
-            Ecto.NoResultsError ->
-              # Previous conversation not found, skip it
-              socket
-          end
-        else
-          socket
-        end
+  # Re-insert a conversation into the stream to trigger re-render with updated active state
+  # Used when switching conversations or starting a new thread
+  defp reset_conversation_in_stream(socket, nil), do: socket
 
-      # Re-insert new conversation to set its active state
-      try do
-        new_conversation = Conversations.get_conversation!(scope, new_id)
-        stream_insert(socket, :conversation_list, new_conversation)
-      rescue
-        Ecto.NoResultsError ->
-          # New conversation not found (shouldn't happen), skip it
+  defp reset_conversation_in_stream(socket, conversation_id) do
+    if socket.assigns.is_thread_history_open do
+      scope = socket.assigns.current_scope
+
+      case Conversations.get_conversation(scope, conversation_id) do
+        {:ok, conversation} ->
+          stream_insert(socket, :conversation_list, conversation)
+
+        {:error, :not_found} ->
           socket
       end
     else
-      # History sidebar not open, no need to update stream
       socket
     end
   end
@@ -875,56 +825,39 @@ defmodule AgentsDemoWeb.ChatLive do
       {:ok, conversation} ->
         Logger.info("Created new conversation: #{conversation.id}")
 
-        # Use filesystem scope from socket (filesystem already running from mount)
-        filesystem_scope = socket.assigns.filesystem_scope
+        agent_id = Coordinator.conversation_agent_id(conversation.id)
 
-        # Start agent session using Coordinator with demo configuration
-        case Coordinator.start_conversation_session(conversation.id,
-               filesystem_scope: filesystem_scope
-             ) do
-          {:ok, session} ->
-            # Subscribe to agent events
-            if connected?(socket) do
-              case AgentServer.subscribe(session.agent_id) do
-                :ok ->
-                  Logger.info("Subscribed to AgentServer for agent #{session.agent_id}")
+        # Subscribe to agent events (works even if agent not running!)
+        # Using ensure_* versions - idempotent, safe to call multiple times
+        if connected?(socket) do
+          :ok = Coordinator.ensure_subscribed_to_conversation(conversation.id)
+          Logger.debug("Ensured subscription to agent events for conversation #{conversation.id}")
 
-                {:error, reason} ->
-                  Logger.error("Failed to subscribe to AgentServer: #{inspect(reason)}")
-              end
-            end
-
-            socket =
-              socket
-              |> assign(:conversation, conversation)
-              |> assign(:conversation_id, conversation.id)
-              |> assign(:agent_id, session.agent_id)
-              |> assign(:page_title, "New Conversation - Agents Demo")
-              |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
-
-            # If thread history is open, insert the new conversation at the top of the list
-            socket =
-              if socket.assigns.is_thread_history_open do
-                socket
-                |> stream_insert(:conversation_list, conversation, at: 0)
-                |> assign(:has_conversations, true)
-              else
-                socket
-              end
-
-            socket
-
-          {:error, reason} ->
-            Logger.error("Failed to start agent session: #{inspect(reason)}")
-
-            # Still set conversation_id so messages can be persisted
-            socket
-            |> assign(:conversation, conversation)
-            |> assign(:conversation_id, conversation.id)
-            |> assign(:page_title, "New Conversation - Agents Demo")
-            |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
-            |> put_flash(:error, "Failed to start agent session: #{inspect(reason)}")
+          # Track presence - this enables smart agent shutdown
+          user_id = socket.assigns.current_scope.user.id
+          {:ok, _ref} = Coordinator.track_conversation_viewer(conversation.id, user_id, self())
+          Logger.debug("Tracking presence for conversation #{conversation.id}, user #{user_id}")
         end
+
+        socket =
+          socket
+          |> assign(:conversation, conversation)
+          |> assign(:conversation_id, conversation.id)
+          |> assign(:agent_id, agent_id)
+          |> assign(:page_title, "New Conversation - Agents Demo")
+          |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
+
+        # If thread history is open, insert the new conversation at the top of the list
+        socket =
+          if socket.assigns.is_thread_history_open do
+            socket
+            |> stream_insert(:conversation_list, conversation, at: 0)
+            |> assign(:has_conversations, true)
+          else
+            socket
+          end
+
+        socket
 
       {:error, changeset} ->
         Logger.error("Failed to create conversation: #{inspect(changeset)}")
@@ -934,13 +867,36 @@ defmodule AgentsDemoWeb.ChatLive do
     end
   end
 
-  # Persist user message to database
-  defp persist_user_message(conversation_id, message_text) do
-    Conversations.append_text_message(conversation_id, "user", message_text)
-  end
-
   defp generate_id do
     :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+  end
+
+  # Helper to persist agent state to database
+  defp persist_agent_state(socket, context_label) do
+    if socket.assigns[:conversation_id] && socket.assigns[:agent_id] do
+      try do
+        state_data = AgentServer.export_state(socket.assigns.agent_id)
+
+        case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
+          {:ok, _} ->
+            Logger.info(
+              "Persisted agent state for conversation #{socket.assigns.conversation_id} (#{context_label})"
+            )
+            :ok
+
+          {:error, reason} ->
+            Logger.error("Failed to persist agent state (#{context_label}): #{inspect(reason)}")
+            {:error, reason}
+        end
+      rescue
+        error ->
+          Logger.error("Exception while persisting agent state (#{context_label}): #{inspect(error)}")
+          {:error, error}
+      end
+    else
+      Logger.debug("Skipping state persistence - no conversation_id or agent_id (#{context_label})")
+      :ok
+    end
   end
 
   defp update_streaming_message(socket, deltas) do
@@ -949,217 +905,6 @@ defmodule AgentsDemoWeb.ChatLive do
     updated_delta = MessageDelta.merge_deltas(current_delta, deltas)
 
     assign(socket, :streaming_delta, updated_delta)
-  end
-
-  defp finalize_streaming_message(socket, message) do
-    conversation_id = socket.assigns.conversation_id
-
-    # Extract both thinking and text content from message
-    content_parts = extract_message_content_parts(message)
-
-    # Log warning if no content - this shouldn't happen
-    if Enum.empty?(content_parts) do
-      Logger.warning(
-        "Received empty message content. Message: #{inspect(message)}, " <>
-          "Streaming delta: #{inspect(socket.assigns.streaming_delta)}"
-      )
-    end
-
-    # Persist and display each content part
-    socket =
-      if not Enum.empty?(content_parts) do
-        # Persist each content part to database if conversation exists
-        display_msgs =
-          if conversation_id do
-            persist_content_parts(conversation_id, content_parts)
-          else
-            # No conversation yet - create in-memory messages
-            create_in_memory_messages(content_parts, conversation_id)
-          end
-
-        # Insert all messages into the stream
-        Enum.reduce(display_msgs, socket, fn msg, acc ->
-          acc
-          |> assign(:has_messages, true)
-          |> stream_insert(:messages, msg)
-        end)
-      else
-        # Empty content - don't persist or display
-        socket
-      end
-
-    # Always clear streaming state
-    assign(socket, :streaming_delta, nil)
-  end
-
-  # Extract content parts from Message struct
-  # Returns a list of {type, data} tuples that need to be persisted
-  # Types: :text, :thinking, :tool_calls, :tool_results
-  defp extract_message_content_parts(%Message{} = message) do
-    parts = []
-
-    # Extract text/thinking content if present
-    parts =
-      case message.content do
-        content when is_binary(content) and content != "" ->
-          parts ++ [{:text, content}]
-
-        content when is_list(content) ->
-          text_thinking_parts =
-            content
-            |> Enum.filter(fn part -> part.type in [:thinking, :text] end)
-            |> Enum.map(fn part -> {part.type, part.content} end)
-            |> Enum.reject(fn {_type, content} -> is_nil(content) or content == "" end)
-
-          parts ++ text_thinking_parts
-
-        _ ->
-          parts
-      end
-
-    # Extract tool_calls if present (assistant messages)
-    parts =
-      case message.tool_calls do
-        tool_calls when is_list(tool_calls) and tool_calls != [] ->
-          parts ++ [{:tool_calls, tool_calls}]
-
-        _ ->
-          parts
-      end
-
-    # Extract tool_results if present (tool messages)
-    parts =
-      case message.tool_results do
-        tool_results when is_list(tool_results) and tool_results != [] ->
-          parts ++ [{:tool_results, tool_results}]
-
-        _ ->
-          parts
-      end
-
-    parts
-  end
-
-  # Persist content parts to database, returning list of DisplayMessage structs
-  defp persist_content_parts(conversation_id, content_parts) do
-    content_parts
-    |> Enum.flat_map(fn {type, data} ->
-      case type do
-        :thinking ->
-          case Conversations.append_thinking_message(conversation_id, data) do
-            {:ok, msg} -> [msg]
-            {:error, reason} ->
-              Logger.error("Failed to persist thinking message: #{inspect(reason)}")
-              [create_fallback_message(conversation_id, type, data)]
-          end
-
-        :text ->
-          case Conversations.append_text_message(conversation_id, "assistant", data) do
-            {:ok, msg} -> [msg]
-            {:error, reason} ->
-              Logger.error("Failed to persist text message: #{inspect(reason)}")
-              [create_fallback_message(conversation_id, type, data)]
-          end
-
-        # NEW: Handle tool_calls (list of ToolCall structs)
-        :tool_calls ->
-          case Conversations.append_tool_calls_batch(conversation_id, data) do
-            {:ok, msgs} -> msgs
-            {:error, reason} ->
-              Logger.error("Failed to persist tool calls: #{inspect(reason)}")
-              # Create fallback messages for each tool call
-              Enum.map(data, fn tool_call ->
-                create_fallback_tool_call_message(conversation_id, tool_call)
-              end)
-          end
-
-        # NEW: Handle tool_results (list of ToolResult structs)
-        :tool_results ->
-          case Conversations.append_tool_results_batch(conversation_id, data) do
-            {:ok, msgs} -> msgs
-            {:error, reason} ->
-              Logger.error("Failed to persist tool results: #{inspect(reason)}")
-              # Create fallback messages for each tool result
-              Enum.map(data, fn tool_result ->
-                create_fallback_tool_result_message(conversation_id, tool_result)
-              end)
-          end
-      end
-    end)
-  end
-
-  # Create in-memory messages when no conversation exists
-  defp create_in_memory_messages(content_parts, conversation_id) do
-    content_parts
-    |> Enum.flat_map(fn {type, data} ->
-      case type do
-        :thinking -> [create_fallback_message(conversation_id, type, data)]
-        :text -> [create_fallback_message(conversation_id, type, data)]
-
-        # NEW: Handle tool_calls
-        :tool_calls ->
-          Enum.map(data, fn tool_call ->
-            create_fallback_tool_call_message(conversation_id, tool_call)
-          end)
-
-        # NEW: Handle tool_results
-        :tool_results ->
-          Enum.map(data, fn tool_result ->
-            create_fallback_tool_result_message(conversation_id, tool_result)
-          end)
-      end
-    end)
-  end
-
-  # Create a fallback in-memory DisplayMessage
-  defp create_fallback_message(conversation_id, type, content) do
-    {content_type, message_type} =
-      case type do
-        :thinking -> {"thinking", "assistant"}
-        :text -> {"text", "assistant"}
-      end
-
-    %DisplayMessage{
-      id: Ecto.UUID.generate(),
-      conversation_id: conversation_id,
-      message_type: message_type,
-      content_type: content_type,
-      content: %{"text" => content},
-      inserted_at: DateTime.utc_now()
-    }
-  end
-
-  # Create a fallback in-memory DisplayMessage for a tool call
-  defp create_fallback_tool_call_message(conversation_id, tool_call) do
-    %DisplayMessage{
-      id: Ecto.UUID.generate(),
-      conversation_id: conversation_id,
-      message_type: "assistant",
-      content_type: "tool_call",
-      content: %{
-        "call_id" => tool_call.call_id,
-        "name" => tool_call.name,
-        "arguments" => tool_call.arguments
-      },
-      inserted_at: DateTime.utc_now()
-    }
-  end
-
-  # Create a fallback in-memory DisplayMessage for a tool result
-  defp create_fallback_tool_result_message(conversation_id, tool_result) do
-    %DisplayMessage{
-      id: Ecto.UUID.generate(),
-      conversation_id: conversation_id,
-      message_type: "tool",
-      content_type: "tool_result",
-      content: %{
-        "tool_call_id" => tool_result.tool_call_id,
-        "name" => tool_result.name,
-        "content" => tool_result.content,
-        "is_error" => tool_result.is_error
-      },
-      inserted_at: DateTime.utc_now()
-    }
   end
 
   defp assign_filesystem_files(socket) do

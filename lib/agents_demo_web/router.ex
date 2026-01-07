@@ -36,12 +36,17 @@ defmodule AgentsDemoWeb.Router do
     # you can use Plug.BasicAuth to set up some basic authentication
     # as long as you are also using SSL (which you should anyway).
     import Phoenix.LiveDashboard.Router
+    import SagentsLiveDebugger.Router
 
     scope "/dev" do
       pipe_through :browser
 
       live_dashboard "/dashboard", metrics: AgentsDemoWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
+
+      sagents_live_debugger "/debug/agents",
+        coordinator: AgentsDemo.Agents.Coordinator,
+        presence_module: AgentsDemoWeb.Presence
     end
   end
 

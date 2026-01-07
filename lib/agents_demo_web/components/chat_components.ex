@@ -377,15 +377,6 @@ defmodule AgentsDemoWeb.ChatComponents do
             >
               <.icon name="hero-document-plus" class="w-5 h-5" />
             </button>
-
-            <button
-              phx-click="setup_demo_data"
-              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
-              type="button"
-              title="Test TODOs"
-            >
-              <.icon name="hero-clipboard-document-check" class="w-5 h-5" />
-            </button>
           </div>
 
           <%= if @current_scope do %>

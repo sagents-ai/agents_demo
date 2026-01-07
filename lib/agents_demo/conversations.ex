@@ -1,0 +1,763 @@
+defmodule AgentsDemo.Conversations do
+  @moduledoc """
+  Context for conversation persistence with multi-content type support.
+
+  This module provides scoped access to conversations, agent states, and display messages.
+
+  ## Scope-Based Security
+
+  All conversation operations require a scope struct (`AgentsDemo.Accounts.Scope`)
+  as the first argument. This ensures queries are automatically filtered to
+  the appropriate user, organization, or team context.
+
+  ## Customization Required
+
+  **IMPORTANT**: The generated code uses generic scope filtering. You must
+  customize the query filters to match your scope struct fields:
+
+  ```elixir
+  # Example: If your scope has :current_user_id
+  defp scope_query(query, %Scope{current_user_id: user_id}) do
+    from q in query, where: q.user_id == ^user_id
+  end
+
+  # Example: If your scope has :organization_id (multi-tenant)
+  defp scope_query(query, %Scope{organization_id: org_id}) do
+    from q in query, where: q.organization_id == ^org_id
+  end
+  ```
+
+  Update `scope_query/2` and related functions based on YOUR scope structure.
+
+  ## Multi-Content Type Support
+
+  Display messages support multiple content types (text, thinking, images, files, etc.).
+  Use the provided helper functions to create messages with proper structure:
+
+  - `append_text_message/3` - Standard text content
+  - `append_thinking_message/2` - AI reasoning blocks
+  - `append_image_message/3` - Images with URL or base64 data
+  - `append_file_message/4` - File references
+  - `append_structured_data_message/4` - Tables, JSON, etc.
+  - `append_notification_message/3` - System notifications
+  - `append_error_message/3` - Error messages
+
+  **IMPORTANT**: All content keys are strings (not atoms) due to JSONB storage.
+  """
+
+  import Ecto.Query, warn: false
+  alias AgentsDemo.Repo
+  alias AgentsDemo.Conversations.AgentState
+  alias AgentsDemo.Conversations.Conversation
+  alias AgentsDemo.Conversations.DisplayMessage
+  alias AgentsDemo.Accounts.Scope, as: Scope
+  alias LangChain.Message.ToolCall
+  alias LangChain.Message.ToolResult
+
+  #
+  # Conversation CRUD
+  #
+
+  @doc """
+  Creates a conversation within the given scope.
+
+  The conversation is automatically associated with the scope's owner.
+  Accepts attrs with either atom or string keys.
+  """
+  def create_conversation(%Scope{} = scope, attrs) do
+    scope
+    |> get_owner_id()
+    |> Conversation.create_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Gets a conversation by ID, scoped to the given context.
+
+  Raises if the conversation doesn't exist or doesn't belong to the scope.
+  """
+  def get_conversation!(%Scope{} = scope, id) do
+    Conversation
+    |> scope_query(scope)
+    |> Repo.get!(id)
+  end
+
+  @doc """
+  Gets a conversation by ID, scoped to the given context.
+
+  Returns `{:ok, conversation}` or `{:error, :not_found}`.
+  """
+  def get_conversation(%Scope{} = scope, id) do
+    Conversation
+    |> scope_query(scope)
+    |> Repo.get(id)
+    |> case do
+      nil -> {:error, :not_found}
+      conversation -> {:ok, conversation}
+    end
+  end
+
+  @doc """
+  Lists all conversations accessible within the given scope.
+
+  ## Options
+
+    * `:limit` - Maximum number of conversations to return (default: 50)
+    * `:offset` - Number of conversations to skip (default: 0)
+  """
+  def list_conversations(%Scope{} = scope, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 50)
+    offset = Keyword.get(opts, :offset, 0)
+
+    Conversation
+    |> scope_query(scope)
+    |> order_by([c], desc: c.updated_at)
+    |> limit(^limit)
+    |> offset(^offset)
+    |> Repo.all()
+  end
+
+  def update_conversation(%Conversation{} = conversation, attrs) do
+    conversation
+    |> Conversation.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_conversation(%Conversation{} = conversation) do
+    Repo.delete(conversation)
+  end
+
+  def delete_conversation(%Scope{} = scope, conversation_id) when is_binary(conversation_id) do
+    conversation = get_conversation!(scope, conversation_id)
+    Repo.delete(conversation)
+  end
+
+  #
+  # Agent State Persistence
+  #
+
+  def save_agent_state(conversation_id, state) do
+    attrs = %{
+      conversation_id: conversation_id,
+      state_data: state,
+      version: state["version"] || 1
+    }
+
+    case get_agent_state(conversation_id) do
+      nil ->
+        %AgentState{}
+        |> AgentState.changeset(attrs)
+        |> Repo.insert()
+
+      existing ->
+        existing
+        |> AgentState.changeset(attrs)
+        |> Repo.update()
+    end
+  end
+
+  def load_agent_state(conversation_id) do
+    case get_agent_state(conversation_id) do
+      nil -> {:error, :not_found}
+      state -> {:ok, state.state_data}
+    end
+  end
+
+  @doc """
+  Loads just the TODOs from a saved agent state.
+
+  This is useful for displaying TODOs in the UI when browsing historical
+  conversations without starting the agent. Returns an empty list if no
+  state exists or if there are no todos.
+
+  Reuses the same deserialization logic as full state restoration via
+  `LangChain.Agents.Todo.from_map/1`.
+  """
+  def load_todos(conversation_id) do
+    alias LangChain.Agents.Todo
+
+    case load_agent_state(conversation_id) do
+      {:ok, %{"state" => %{"todos" => todos}}} when is_list(todos) ->
+        # Reuse Todo.from_map/1 - same logic as StateSerializer.deserialize_state/2
+        todos
+        |> Enum.map(fn todo_map ->
+          case Todo.from_map(todo_map) do
+            {:ok, todo} -> todo
+            {:error, _} -> nil
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      {:ok, _} ->
+        # State exists but no todos field
+        []
+
+      {:error, :not_found} ->
+        # No saved state
+        []
+    end
+  end
+
+  defp get_agent_state(conversation_id) do
+    AgentState
+    |> where([a], a.conversation_id == ^conversation_id)
+    |> Repo.one()
+  end
+
+  #
+  # Display Messages
+  #
+
+  @doc """
+  Appends a display message to the conversation.
+
+  The message should be a map with keys:
+  - `message_type` - "user", "assistant", "tool", "system"
+  - `content_type` - Type of content for rendering
+  - `content` - Map with structure based on content_type
+  - `metadata` - Optional metadata
+
+  For easier usage, consider using the content-type-specific helper functions.
+  """
+  def append_display_message(conversation_id, attrs) do
+    conversation_id
+    |> DisplayMessage.create_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Loads all display messages for a conversation.
+
+  ## Options
+
+    * `:limit` - Maximum number of messages to return (default: 100)
+    * `:offset` - Number of messages to skip (default: 0)
+  """
+  def load_display_messages(conversation_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+    offset = Keyword.get(opts, :offset, 0)
+
+    DisplayMessage
+    |> where([m], m.conversation_id == ^conversation_id)
+    |> order_by([m], [asc: m.inserted_at, asc: m.sequence])
+    |> limit(^limit)
+    |> offset(^offset)
+    |> Repo.all()
+  end
+
+  #
+  # Content Type Helper Functions
+  # NOTE: All helper functions create content maps with STRING keys (not atoms)
+  # because Ecto :map type (JSONB) stores keys as strings
+  #
+
+  @doc """
+  Appends a text message to the conversation.
+
+  ## Parameters
+
+    * `conversation_id` - The conversation ID
+    * `message_type` - The message type ("user", "assistant", "tool", "system")
+    * `text` - The text content
+
+  ## Examples
+
+      append_text_message(convo_id, "user", "Hello!")
+      append_text_message(convo_id, "assistant", "How can I help?")
+  """
+  def append_text_message(conversation_id, message_type, text) do
+    append_display_message(conversation_id, %{
+      message_type: message_type,
+      content_type: "text",
+      content: %{"text" => text}  # String keys!
+    })
+  end
+
+  @doc """
+  Appends a thinking block to the conversation.
+
+  Thinking blocks are internal AI reasoning that should be visually
+  distinguished from regular responses. Only valid for "assistant" message type.
+
+  ## Examples
+
+      append_thinking_message(convo_id, "Let me analyze this step by step...")
+  """
+  def append_thinking_message(conversation_id, thinking_text) do
+    append_display_message(conversation_id, %{
+      message_type: "assistant",
+      content_type: "thinking",
+      content: %{"text" => thinking_text}  # String keys!
+    })
+  end
+
+  @doc """
+  Appends an image message to the conversation.
+
+  ## Parameters
+
+    * `conversation_id` - The conversation ID
+    * `image_url` - URL to the image
+    * `opts` - Options:
+      * `:message_type` - Message type (default: "assistant")
+      * `:alt_text` - Alt text for the image
+      * `:caption` - Caption to display
+
+  ## Examples
+
+      append_image_message(convo_id, "/uploads/chart.png", alt_text: "Sales Chart")
+      append_image_message(convo_id, "https://example.com/image.jpg",
+        message_type: "tool", caption: "Generated chart")
+  """
+  def append_image_message(conversation_id, image_url, opts \\ []) do
+    content = %{"url" => image_url}  # String keys!
+    content = if alt = Keyword.get(opts, :alt_text), do: Map.put(content, "alt_text", alt), else: content
+    content = if caption = Keyword.get(opts, :caption), do: Map.put(content, "caption", caption), else: content
+
+    message_type = Keyword.get(opts, :message_type, "assistant")
+
+    append_display_message(conversation_id, %{
+      message_type: message_type,
+      content_type: "image",
+      content: content
+    })
+  end
+
+  @doc """
+  Appends a file reference message to the conversation.
+
+  ## Parameters
+
+    * `conversation_id` - The conversation ID
+    * `file_path` - Path to the file
+    * `file_name` - Display name of the file
+    * `opts` - Options:
+      * `:message_type` - Message type (default: "tool")
+      * `:size` - File size in bytes
+      * `:mime_type` - MIME type
+      * `:metadata` - Additional metadata
+
+  ## Examples
+
+      append_file_message(convo_id, "/tmp/report.pdf", "Q4 Report.pdf",
+        size: 245760, mime_type: "application/pdf")
+  """
+  def append_file_message(conversation_id, file_path, file_name, opts \\ []) do
+    content = %{"path" => file_path, "name" => file_name}  # String keys!
+    content = if size = Keyword.get(opts, :size), do: Map.put(content, "size", size), else: content
+    content = if mime = Keyword.get(opts, :mime_type), do: Map.put(content, "mime_type", mime), else: content
+
+    message_type = Keyword.get(opts, :message_type, "tool")
+
+    append_display_message(conversation_id, %{
+      message_type: message_type,
+      content_type: "file_reference",
+      content: content,
+      metadata: Keyword.get(opts, :metadata, %{})
+    })
+  end
+
+  @doc """
+  Appends a structured data message to the conversation.
+
+  ## Parameters
+
+    * `conversation_id` - The conversation ID
+    * `format` - Data format ("table", "json", "list")
+    * `data` - The data to display
+    * `opts` - Options:
+      * `:message_type` - Message type (default: "tool")
+      * `:columns` - Column headers for tables
+      * `:metadata` - Additional metadata
+
+  ## Examples
+
+      # Table format
+      append_structured_data_message(convo_id, "table",
+        [["North", 125000], ["South", 98000]],
+        columns: ["Region", "Sales"])
+
+      # JSON format
+      append_structured_data_message(convo_id, "json",
+        %{"status" => "success", "count" => 42})
+  """
+  def append_structured_data_message(conversation_id, format, data, opts \\ []) do
+    content = %{"format" => format, "data" => data}  # String keys!
+    content = if columns = Keyword.get(opts, :columns), do: Map.put(content, "columns", columns), else: content
+
+    message_type = Keyword.get(opts, :message_type, "tool")
+
+    append_display_message(conversation_id, %{
+      message_type: message_type,
+      content_type: "structured_data",
+      content: content,
+      metadata: Keyword.get(opts, :metadata, %{})
+    })
+  end
+
+  @doc """
+  Appends a notification message to the conversation.
+
+  ## Parameters
+
+    * `conversation_id` - The conversation ID
+    * `text` - Notification text
+    * `opts` - Options:
+      * `:level` - Notification level ("info", "warning", "success") (default: "info")
+      * `:details` - Additional details
+
+  ## Examples
+
+      append_notification_message(convo_id, "Conversation was compacted",
+        level: "info", details: %{"messages_removed" => 15})
+  """
+  def append_notification_message(conversation_id, text, opts \\ []) do
+    level = Keyword.get(opts, :level, "info")
+    content = %{"text" => text, "level" => level}  # String keys!
+    content = if details = Keyword.get(opts, :details), do: Map.put(content, "details", details), else: content
+
+    append_display_message(conversation_id, %{
+      message_type: "system",
+      content_type: "notification",
+      content: content
+    })
+  end
+
+  @doc """
+  Appends an error message to the conversation.
+
+  ## Parameters
+
+    * `conversation_id` - The conversation ID
+    * `error_text` - Error message text
+    * `opts` - Options:
+      * `:message_type` - Message type (default: "tool")
+      * `:code` - Error code
+      * `:details` - Additional error details
+      * `:metadata` - Additional metadata (e.g., tool name)
+
+  ## Examples
+
+      append_error_message(convo_id, "Failed to connect to database",
+        code: "DB_CONNECTION_ERROR",
+        details: "Connection timeout after 30s",
+        metadata: %{"tool_name" => "database_query"})
+  """
+  def append_error_message(conversation_id, error_text, opts \\ []) do
+    content = %{"text" => error_text}  # String keys!
+    content = if code = Keyword.get(opts, :code), do: Map.put(content, "code", code), else: content
+    content = if details = Keyword.get(opts, :details), do: Map.put(content, "details", details), else: content
+
+    message_type = Keyword.get(opts, :message_type, "tool")
+
+    append_display_message(conversation_id, %{
+      message_type: message_type,
+      content_type: "error",
+      content: content,
+      metadata: Keyword.get(opts, :metadata, %{})
+    })
+  end
+
+  @doc """
+  Appends a tool call as a DisplayMessage to the conversation.
+
+  Tool calls represent the assistant requesting to execute a tool.
+  Each tool call includes the tool name, arguments, and a unique call_id.
+
+  ## Parameters
+
+  - conversation_id: UUID of the conversation
+  - tool_call: LangChain.Message.ToolCall struct with call_id, name, and arguments
+
+  ## Returns
+
+  - {:ok, %DisplayMessage{}} on success
+  - {:error, changeset} on validation failure
+
+  ## Example
+
+      tool_call = %ToolCall{
+        call_id: "call_123",
+        name: "search_web",
+        arguments: %{"query" => "Oslo attractions"}
+      }
+
+      {:ok, display_msg} = Conversations.append_tool_call_message(conversation_id, tool_call)
+  """
+  @spec append_tool_call_message(Ecto.UUID.t(), ToolCall.t()) ::
+          {:ok, DisplayMessage.t()} | {:error, Ecto.Changeset.t()}
+  def append_tool_call_message(conversation_id, %ToolCall{} = tool_call) do
+    # Convert ToolCall struct to DisplayMessage content format
+    content = %{
+      "call_id" => tool_call.call_id,
+      "name" => tool_call.name,
+      "arguments" => tool_call.arguments
+    }
+
+    attrs = %{
+      message_type: "assistant",
+      content_type: "tool_call",
+      content: content,
+      sequence: 0,
+      metadata: %{}
+    }
+
+    conversation_id
+    |> DisplayMessage.create_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Appends a tool result as a DisplayMessage to the conversation.
+
+  Tool results represent the system's response after executing a tool.
+  Each result includes the tool_call_id (linking back to the request),
+  tool name, result content, and error status.
+
+  ## Parameters
+
+  - conversation_id: UUID of the conversation
+  - tool_result: LangChain.Message.ToolResult struct
+
+  ## Returns
+
+  - {:ok, %DisplayMessage{}} on success
+  - {:error, changeset} on validation failure
+
+  ## Example
+
+      tool_result = %ToolResult{
+        tool_call_id: "call_123",
+        name: "search_web",
+        content: "Found 5 attractions in Oslo...",
+        is_error: false
+      }
+
+      {:ok, display_msg} = Conversations.append_tool_result_message(conversation_id, tool_result)
+  """
+  @spec append_tool_result_message(Ecto.UUID.t(), ToolResult.t()) ::
+          {:ok, DisplayMessage.t()} | {:error, Ecto.Changeset.t()}
+  def append_tool_result_message(conversation_id, %ToolResult{} = tool_result) do
+    # Convert ToolResult struct to DisplayMessage content format
+    # Extract content as string - it may be a list of ContentParts or a string
+    content_str = extract_tool_result_content(tool_result.content)
+
+    content = %{
+      "tool_call_id" => tool_result.tool_call_id,
+      "name" => tool_result.name,
+      "content" => content_str,
+      "is_error" => tool_result.is_error
+    }
+
+    attrs = %{
+      message_type: "tool",
+      content_type: "tool_result",
+      content: content,
+      sequence: 0,
+      metadata: %{}
+    }
+
+    conversation_id
+    |> DisplayMessage.create_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Appends multiple tool calls as DisplayMessages to the conversation.
+
+  When an assistant message includes multiple tool calls, this function
+  creates a DisplayMessage for each one with proper sequence ordering.
+
+  ## Parameters
+
+  - conversation_id: UUID of the conversation
+  - tool_calls: List of LangChain.Message.ToolCall structs
+
+  ## Returns
+
+  - {:ok, [%DisplayMessage{}, ...]} on success (list of created messages)
+  - {:error, changeset} on validation failure
+
+  ## Example
+
+      tool_calls = [
+        %ToolCall{call_id: "call_1", name: "search_web", arguments: %{...}},
+        %ToolCall{call_id: "call_2", name: "get_weather", arguments: %{...}}
+      ]
+
+      {:ok, display_msgs} = Conversations.append_tool_calls_batch(conversation_id, tool_calls)
+  """
+  @spec append_tool_calls_batch(Ecto.UUID.t(), [ToolCall.t()]) ::
+          {:ok, [DisplayMessage.t()]} | {:error, Ecto.Changeset.t()}
+  def append_tool_calls_batch(conversation_id, tool_calls) when is_list(tool_calls) do
+    # Create DisplayMessages with sequence 0, 1, 2, ... for each tool call
+    results =
+      tool_calls
+      |> Enum.with_index()
+      |> Enum.map(fn {tool_call, index} ->
+        content = %{
+          "call_id" => tool_call.call_id,
+          "name" => tool_call.name,
+          "arguments" => tool_call.arguments
+        }
+
+        attrs = %{
+          message_type: "assistant",
+          content_type: "tool_call",
+          content: content,
+          sequence: index,
+          metadata: %{}
+        }
+
+        conversation_id
+        |> DisplayMessage.create_changeset(attrs)
+        |> Repo.insert()
+      end)
+
+    # Check if any insertions failed
+    errors = Enum.filter(results, &match?({:error, _}, &1))
+
+    if Enum.empty?(errors) do
+      {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
+    else
+      # Return first error
+      hd(errors)
+    end
+  end
+
+  @doc """
+  Appends multiple tool results as DisplayMessages to the conversation.
+
+  When a tool message includes multiple results, this function creates
+  a DisplayMessage for each one with proper sequence ordering.
+
+  ## Parameters
+
+  - conversation_id: UUID of the conversation
+  - tool_results: List of LangChain.Message.ToolResult structs
+
+  ## Returns
+
+  - {:ok, [%DisplayMessage{}, ...]} on success (list of created messages)
+  - {:error, changeset} on validation failure
+
+  ## Example
+
+      tool_results = [
+        %ToolResult{tool_call_id: "call_1", name: "search_web", content: "..."},
+        %ToolResult{tool_call_id: "call_2", name: "get_weather", content: "..."}
+      ]
+
+      {:ok, display_msgs} = Conversations.append_tool_results_batch(conversation_id, tool_results)
+  """
+  @spec append_tool_results_batch(Ecto.UUID.t(), [ToolResult.t()]) ::
+          {:ok, [DisplayMessage.t()]} | {:error, Ecto.Changeset.t()}
+  def append_tool_results_batch(conversation_id, tool_results) when is_list(tool_results) do
+    # Create DisplayMessages with sequence 0, 1, 2, ... for each tool result
+    results =
+      tool_results
+      |> Enum.with_index()
+      |> Enum.map(fn {tool_result, index} ->
+        # Extract content as string - it may be a list of ContentParts or a string
+        content_str = extract_tool_result_content(tool_result.content)
+
+        content = %{
+          "tool_call_id" => tool_result.tool_call_id,
+          "name" => tool_result.name,
+          "content" => content_str,
+          "is_error" => tool_result.is_error
+        }
+
+        attrs = %{
+          message_type: "tool",
+          content_type: "tool_result",
+          content: content,
+          sequence: index,
+          metadata: %{}
+        }
+
+        conversation_id
+        |> DisplayMessage.create_changeset(attrs)
+        |> Repo.insert()
+      end)
+
+    # Check if any insertions failed
+    errors = Enum.filter(results, &match?({:error, _}, &1))
+
+    if Enum.empty?(errors) do
+      {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
+    else
+      # Return first error
+      hd(errors)
+    end
+  end
+
+  @doc """
+  Filters messages by content type.
+
+  ## Examples
+
+      load_display_messages_by_type(convo_id, "thinking")
+      load_display_messages_by_type(convo_id, "image", limit: 10)
+  """
+  def load_display_messages_by_type(conversation_id, content_type, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+    offset = Keyword.get(opts, :offset, 0)
+
+    from(m in DisplayMessage,
+      where: m.conversation_id == ^conversation_id,
+      where: m.content_type == ^content_type,
+      order_by: [asc: m.inserted_at, asc: m.sequence],
+      limit: ^limit,
+      offset: ^offset
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Searches message content across all types.
+
+  Requires scope for security. Searches within all conversations
+  accessible to the given scope.
+
+  ## Examples
+
+      search_messages(scope, "quarterly report")
+  """
+  def search_messages(%Scope{} = scope, search_term) do
+    # Extract owner field from scope for security
+    owner_id = get_owner_id(scope)
+
+    from(m in DisplayMessage,
+      join: c in Conversation, on: m.conversation_id == c.id,
+      where: c.user_id == ^owner_id,
+      where: fragment("?::text ILIKE ?", m.content, ^"%#{search_term}%")
+    )
+    |> Repo.all()
+  end
+
+  #
+  # Private Helpers
+  #
+
+  defp scope_query(query, %Scope{} = scope) do
+    owner_id = get_owner_id(scope)
+    from q in query, where: q.user_id == ^owner_id
+  end
+
+  defp get_owner_id(%Scope{user: user}), do: user.id
+
+  # Extract tool result content as a string
+  # ToolResult.content can be a string or a list of ContentParts
+  defp extract_tool_result_content(content) when is_binary(content), do: content
+
+  defp extract_tool_result_content(content) when is_list(content) do
+    # Extract text from ContentParts
+    content
+    |> Enum.filter(fn part -> part.type == :text end)
+    |> Enum.map(fn part -> part.content end)
+    |> Enum.join("\n")
+  end
+
+  defp extract_tool_result_content(_), do: ""
+end

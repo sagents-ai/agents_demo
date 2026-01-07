@@ -1,0 +1,23 @@
+Inspiring Quotes Collection
+==========================
+
+"The only way to do great work is to love what you do."
+— Steve Jobs
+
+"Innovation distinguishes between a leader and a follower."
+— Steve Jobs
+
+"The best time to plant a tree was 20 years ago. The second best time is now."
+— Chinese Proverb
+
+"Whether you think you can or you think you can't, you're right."
+— Henry Ford
+
+"The future belongs to those who believe in the beauty of their dreams."
+— Eleanor Roosevelt
+
+---
+Try asking me to:
+- Add more quotes
+- Search for quotes by a specific person
+- Create a new category of quotes
