@@ -37,3 +37,6 @@ npm-debug.log
 
 # ENV config file
 .envrc
+
+# User-generated files (not source control)
+/user_files/
