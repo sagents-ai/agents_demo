@@ -420,13 +420,13 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:status_changed, :running, nil}, socket) do
+  def handle_info({:agent, {:status_changed, :running, nil}}, socket) do
     Logger.info("Agent is running")
     {:noreply, assign(socket, :agent_status, :running)}
   end
 
   @impl true
-  def handle_info({:status_changed, :idle, _data}, socket) do
+  def handle_info({:agent, {:status_changed, :idle, _data}}, socket) do
     Logger.info("Agent returned to idle state (execution completed)")
 
     # Persist agent state after successful completion
@@ -441,7 +441,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:status_changed, :cancelled, _data}, socket) do
+  def handle_info({:agent, {:status_changed, :cancelled, _data}}, socket) do
     Logger.info("Agent execution was cancelled")
 
     # Persist cancellation message to database and display it
@@ -494,7 +494,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:status_changed, :interrupted, interrupt_data}, socket) do
+  def handle_info({:agent, {:status_changed, :interrupted, interrupt_data}}, socket) do
     Logger.info("Agent execution interrupted - awaiting human approval")
     Logger.debug("Interrupt data: #{inspect(interrupt_data)}")
 
@@ -513,7 +513,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:status_changed, :error, reason}, socket) do
+  def handle_info({:agent, {:status_changed, :error, reason}}, socket) do
     Logger.error("Agent execution failed: #{inspect(reason)}")
 
     error_display =
@@ -572,13 +572,13 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:todos_updated, todos}, socket) do
+  def handle_info({:agent, {:todos_updated, todos}}, socket) do
     Logger.debug("TODOs updated: #{length(todos)} items")
     {:noreply, assign(socket, :todos, todos)}
   end
 
   @impl true
-  def handle_info({:llm_deltas, deltas}, socket) do
+  def handle_info({:agent, {:llm_deltas, deltas}}, socket) do
     # Append deltas to current streaming message
     socket =
       socket
@@ -589,7 +589,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:llm_message, _message}, socket) do
+  def handle_info({:agent, {:llm_message, _message}}, socket) do
     # Complete message received - clear streaming state
     # This event signals that message processing is complete (separate from display)
     Logger.info("Complete LLM message received")
@@ -603,7 +603,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:display_message_saved, display_msg}, socket) do
+  def handle_info({:agent, {:display_message_saved, display_msg}}, socket) do
     {:noreply,
      socket
      |> assign(:has_messages, true)
@@ -612,14 +612,14 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:llm_token_usage, usage}, socket) do
+  def handle_info({:agent, {:llm_token_usage, usage}}, socket) do
     # Optional: Display token usage stats
     Logger.debug("Token usage: #{inspect(usage)}")
     {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:conversation_title_generated, new_title, agent_id}, socket) do
+  def handle_info({:agent, {:conversation_title_generated, new_title, agent_id}}, socket) do
     # Verify this is for our agent and we have a current conversation
     if agent_id == socket.assigns.agent_id && socket.assigns.conversation do
       # Update database
