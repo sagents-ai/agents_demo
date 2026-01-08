@@ -676,6 +676,15 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
+  def handle_info({:agent, {:agent_shutdown, shutdown_data}}, socket) do
+    Logger.info("Agent #{shutdown_data.agent_id} shutting down: #{shutdown_data.reason}")
+
+    # Clear the agent_id since the agent is no longer running
+    # The next interaction will restart the agent via Coordinator
+    {:noreply, assign(socket, :agent_id, nil)}
+  end
+
+  @impl true
   def handle_info({:file_system, {event_type, path}}, socket) do
     Logger.debug("FileSystem event #{event_type}: #{path}")
     {:noreply, assign_filesystem_files(socket)}
