@@ -482,6 +482,8 @@ defmodule AgentsDemo.Agents.Coordinator do
       debug_pubsub: {@pubsub_module, @pubsub_name},
       inactivity_timeout: inactivity_timeout,
       presence_tracking: presence_tracking,
+      # Enable presence-based agent discovery for debugger
+      presence_module: @presence_module,
       conversation_id: conversation_id,
       save_new_message_fn: &Coordinator.save_message/2
     ]
