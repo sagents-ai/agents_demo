@@ -1,5 +1,11 @@
 This is a web application written using the Phoenix web framework.
 
+The purpose of the project is to be a full and developed example for building a complex Agentic application. It uses the Elixir LangChain library to implement the core functionality and the `agents_demo` is an example of how to properly apply it.
+
+This project has zero users. We are building a recommended-use pattern for others to follow. Do not use "backward compatible" solutions. Do not create "migration guides" for changes. Create it correctly in this project. Solutions that should be part of the core library should be pushed down to that level. This project shows how to correctly use the library in a recommended way.
+
+A refactor or feature creation is not complete until the tests are run and pass.
+
 ## Project guidelines
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues

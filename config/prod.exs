@@ -17,5 +17,10 @@ config :swoosh, local: false
 # Do not print debug messages in production
 config :logger, level: :info
 
+# Sagents LiveDebugger config - don't auto-follow
+config :sagents_live_debugger,
+  auto_follow_default: false,
+  default_filters: :none
+
 # Runtime production configuration, including reading
 # of environment variables, is done on config/runtime.exs.

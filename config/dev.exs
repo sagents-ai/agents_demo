@@ -91,3 +91,8 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# Sagents LiveDebugger config
+config :sagents_live_debugger,
+  auto_follow_default: true,
+  default_filters: :all
