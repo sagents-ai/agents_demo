@@ -199,9 +199,16 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("new_thread", _params, socket) do
     previous_conversation_id = socket.assigns[:conversation_id]
 
-    # Unsubscribe from current conversation if any
+    # Unsubscribe and untrack presence from current conversation if any
     if previous_conversation_id do
       :ok = Coordinator.unsubscribe_from_conversation(previous_conversation_id)
+
+      # Untrack presence BEFORE modifying socket assigns so AgentServer
+      # sees viewer count drop to 0 and can trigger smart shutdown
+      if connected?(socket) do
+        user_id = socket.assigns.current_scope.user.id
+        Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
+      end
     end
 
     socket =
