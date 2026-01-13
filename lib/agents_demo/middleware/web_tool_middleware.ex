@@ -168,6 +168,8 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
 
   defp build_web_lookup_tool(config) do
     Function.new!(%{
+      # make the `web_lookup` tool be async so they can run in parallel
+      async: true,
       name: "web_lookup",
       description: """
       Search the web, fetch the most relevant page, and extract key information.
