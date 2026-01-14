@@ -10,6 +10,12 @@ import Config
 # LangChain configuration (all environments)
 config :langchain, :anthropic_key, System.get_env("ANTHROPIC_API_KEY")
 
+# Async tool timeout configuration for LangChain
+# Default is :infinity (no timeout) for human-interactive use cases.
+# Set a finite timeout (in milliseconds) for automated/unattended agents.
+# Example: 10 * 60 * 1000 = 10 minutes
+config :langchain, async_tool_timeout: :infinity
+
 # ## Using releases
 #
 # If you use `mix release`, you need to explicitly enable the server
