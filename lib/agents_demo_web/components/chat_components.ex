@@ -684,9 +684,7 @@ defmodule AgentsDemoWeb.ChatComponents do
             <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
               Response
             </summary>
-            <div class="mt-2 p-2 bg-[var(--color-background)] rounded">
-              {format_tool_result_content(@content)}
-            </div>
+            <div class="mt-2 p-2 bg-[var(--color-background)] rounded whitespace-pre-wrap font-mono text-xs" phx-no-format>{format_tool_result_content(@content)}</div>
           </details>
         </div>
       </div>
