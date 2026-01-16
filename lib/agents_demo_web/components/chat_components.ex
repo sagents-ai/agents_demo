@@ -473,6 +473,7 @@ defmodule AgentsDemoWeb.ChatComponents do
           name="message"
           value={@input}
           phx-change="update_input"
+          phx-debounce="300"
           placeholder="Type your message..."
           class="flex-1 px-5 py-3.5 border-2 border-[var(--color-border)] rounded-xl bg-white dark:bg-[var(--color-surface)] text-[var(--color-text-primary)] text-base outline-none focus:border-[var(--color-user-message)] focus:ring-4 focus:ring-[var(--color-user-message)]/10 hover:border-[var(--color-text-tertiary)] transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           autocomplete="off"
