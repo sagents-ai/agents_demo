@@ -101,10 +101,29 @@ defmodule AgentsDemo.Agents.Factory do
 
     # Use the full middleware stack that matches application.ex
     # This ensures consistency between new and restored conversations
+    #
+    # Note: SubAgent middleware is configured with block_middleware to prevent
+    # certain middleware from being inherited by general-purpose subagents.
+    # This is important for:
+    #   - WebToolMiddleware: Subagents spawning web lookups that spawn more subagents
+    #   - Summarization: Short-lived subagents don't need conversation summarization;
+    #     it wastes tokens and adds latency for tasks that complete quickly
+    #   - ConversationTitle: Subagents don't need titles since they're ephemeral
+    #     and their results are returned to the parent agent
+    subagent_middleware =
+      {LangChain.Agents.Middleware.SubAgent,
+       [
+         block_middleware: [
+           AgentsDemo.Middleware.WebToolMiddleware,
+           LangChain.Agents.Middleware.Summarization,
+           LangChain.Agents.Middleware.ConversationTitle
+         ]
+       ]}
+
     base_middleware = [
       LangChain.Agents.Middleware.TodoList,
       filesystem_middleware,
-      LangChain.Agents.Middleware.SubAgent,
+      subagent_middleware,
       LangChain.Agents.Middleware.Summarization,
       LangChain.Agents.Middleware.PatchToolCalls
     ]
