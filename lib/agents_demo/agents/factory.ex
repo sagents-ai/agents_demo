@@ -10,6 +10,7 @@ defmodule AgentsDemo.Agents.Factory do
   alias LangChain.Agents.Agent
   alias LangChain.Agents.Middleware.ConversationTitle
   alias AgentsDemo.Middleware.WebToolMiddleware
+  alias AgentsDemo.Middleware.InjectCurrentTime
   alias LangChain.Utils.BedrockConfig
 
   # New Anthropic models to use
@@ -32,6 +33,7 @@ defmodule AgentsDemo.Agents.Factory do
     - `:agent_id` - Required. The agent's runtime identifier.
     - `:interrupt_on` - Optional. Map of tool names to interrupt configs (default: write_file and delete_file).
     - `:filesystem_scope` - Optional. Scope tuple for filesystem reference (e.g., {:user, 123}).
+    - `:timezone` - Optional. IANA timezone string for timestamp injection (default: "UTC").
 
   ## Examples
 
@@ -44,6 +46,9 @@ defmodule AgentsDemo.Agents.Factory do
       # With filesystem scope
       {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123", filesystem_scope: {:user, 1})
 
+      # With timezone for timestamp injection
+      {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123", timezone: "America/Denver")
+
       # Without human-in-the-loop
       {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123", interrupt_on: nil)
   """
@@ -55,6 +60,7 @@ defmodule AgentsDemo.Agents.Factory do
       "delete_file" => true
     })
     filesystem_scope = Keyword.get(opts, :filesystem_scope)
+    timezone = Keyword.get(opts, :timezone, "UTC")
 
     # Get model configuration from environment
     model = get_model_config()
@@ -76,7 +82,7 @@ defmodule AgentsDemo.Agents.Factory do
         """,
         name: "Demo Agent",
         # Middleware is defined here in code, not loaded from database
-        middleware: build_demo_middleware(interrupt_on, filesystem_scope),
+        middleware: build_demo_middleware(interrupt_on, filesystem_scope, timezone),
         # Add any custom tools here
         tools: []
       },
@@ -86,7 +92,7 @@ defmodule AgentsDemo.Agents.Factory do
     )
   end
 
-  defp build_demo_middleware(interrupt_on, filesystem_scope) do
+  defp build_demo_middleware(interrupt_on, filesystem_scope, timezone) do
     api_key = System.fetch_env!("ANTHROPIC_API_KEY")
 
     # Configure FileSystem middleware based on scope
@@ -110,17 +116,23 @@ defmodule AgentsDemo.Agents.Factory do
     #     it wastes tokens and adds latency for tasks that complete quickly
     #   - ConversationTitle: Subagents don't need titles since they're ephemeral
     #     and their results are returned to the parent agent
+    #   - InjectCurrentTime: Subagents don't need timestamp injection since they're
+    #     ephemeral and inherit any required temporal context from the parent agent
     subagent_middleware =
       {LangChain.Agents.Middleware.SubAgent,
        [
          block_middleware: [
            AgentsDemo.Middleware.WebToolMiddleware,
+           AgentsDemo.Middleware.InjectCurrentTime,
            LangChain.Agents.Middleware.Summarization,
            LangChain.Agents.Middleware.ConversationTitle
          ]
        ]}
 
+    # InjectCurrentTime is positioned early to ensure timestamps are added
+    # before other middleware processes user messages
     base_middleware = [
+      {InjectCurrentTime, [timezone: timezone]},
       LangChain.Agents.Middleware.TodoList,
       filesystem_middleware,
       subagent_middleware,

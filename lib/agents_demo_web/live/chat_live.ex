@@ -37,6 +37,15 @@ defmodule AgentsDemoWeb.ChatLive do
           nil
       end
 
+    # Get timezone from LiveSocket params (sent from browser)
+    # This is only available when the socket is connected
+    timezone =
+      if connected?(socket) do
+        get_connect_params(socket)["timezone"] || "UTC"
+      else
+        "UTC"
+      end
+
     # For new conversations, agent_id will be set when conversation is created
     {:ok,
      socket
@@ -49,6 +58,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:conversation_id, nil)
      |> assign(:agent_id, nil)
      |> assign(:filesystem_scope, filesystem_scope)
+     |> assign(:timezone, timezone)
      |> assign(:todos, [])
      |> assign_filesystem_files()
      |> assign(:sidebar_collapsed, false)
@@ -127,11 +137,13 @@ defmodule AgentsDemoWeb.ChatLive do
 
       conversation_id = socket.assigns.conversation_id
       filesystem_scope = socket.assigns.filesystem_scope
+      timezone = socket.assigns.timezone
 
       # Ensure agent is running (seamless start if not)
       # Coordinator.start_conversation_session is idempotent
       case Coordinator.start_conversation_session(conversation_id,
-             filesystem_scope: filesystem_scope
+             filesystem_scope: filesystem_scope,
+             timezone: timezone
            ) do
         {:ok, session} ->
           # Create LangChain Message

@@ -59,6 +59,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   - `:interrupt_on` - Map of tool names to interrupt configuration
   - `:user` - Current user struct (for audit/permissions)
   - `:filesystem_scope` - Scope tuple for filesystem reference (e.g., {:user, 123}) (optional)
+  - `:timezone` - IANA timezone string for timestamp injection (e.g., "America/Denver") (optional, default: "UTC")
   - `:inactivity_timeout` - Timeout in milliseconds for automatic shutdown (optional, default: 1 hour)
 
   ## Returns
@@ -441,14 +442,16 @@ defmodule AgentsDemo.Agents.Coordinator do
   defp do_start_session(conversation_id, agent_id, opts) do
     Logger.info("Starting agent session for conversation #{conversation_id}")
 
-    # 1. Extract filesystem_scope from options
+    # 1. Extract filesystem_scope and timezone from options
     filesystem_scope = Keyword.get(opts, :filesystem_scope)
+    timezone = Keyword.get(opts, :timezone, "UTC")
 
-    # 2. Create agent from factory (configuration from code) with filesystem_scope
+    # 2. Create agent from factory (configuration from code) with filesystem_scope and timezone
     factory_opts =
       opts
       |> Keyword.put(:agent_id, agent_id)
       |> Keyword.put(:filesystem_scope, filesystem_scope)
+      |> Keyword.put(:timezone, timezone)
 
     {:ok, agent} = Factory.create_demo_agent(factory_opts)
 
