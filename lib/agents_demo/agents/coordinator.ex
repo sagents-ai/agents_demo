@@ -28,7 +28,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   """
 
   alias __MODULE__
-  alias LangChain.Agents.{State, AgentServer, AgentSupervisor}
+  alias Sagents.{State, AgentServer, AgentSupervisor}
   alias LangChain.Message
   alias LangChain.Message.DisplayHelpers
   alias AgentsDemo.{Conversations, Agents.Factory}
@@ -193,7 +193,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   Ensure the current process is subscribed to agent events for a conversation.
 
   This function is idempotent - safe to call multiple times. It delegates to
-  LangChain.PubSub.subscribe/3 for subscription management.
+  Sagents.PubSub.subscribe/3 for subscription management.
 
   This works even when the agent isn't running because PubSub topics exist
   independently of processes. When the agent later starts and publishes events,
@@ -217,7 +217,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   def ensure_subscribed_to_conversation(conversation_id) do
     agent_id = conversation_agent_id(conversation_id)
     topic = agent_topic(agent_id)
-    LangChain.PubSub.subscribe(@pubsub_module, @pubsub_name, topic)
+    Sagents.PubSub.subscribe(@pubsub_module, @pubsub_name, topic)
   end
 
   @doc """
@@ -235,7 +235,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   def subscribe_to_conversation(conversation_id) do
     agent_id = conversation_agent_id(conversation_id)
     topic = agent_topic(agent_id)
-    LangChain.PubSub.raw_subscribe(@pubsub_module, @pubsub_name, topic)
+    Sagents.PubSub.raw_subscribe(@pubsub_module, @pubsub_name, topic)
   end
 
   @doc """
@@ -246,7 +246,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   def unsubscribe_from_conversation(conversation_id) do
     agent_id = conversation_agent_id(conversation_id)
     topic = agent_topic(agent_id)
-    LangChain.PubSub.unsubscribe(@pubsub_module, @pubsub_name, topic)
+    Sagents.PubSub.unsubscribe(@pubsub_module, @pubsub_name, topic)
   end
 
   @doc """
@@ -289,7 +289,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   def track_conversation_viewer(conversation_id, viewer_id, pid, metadata \\ %{}) do
     topic = presence_topic(conversation_id)
     full_metadata = Map.merge(%{joined_at: System.system_time(:second)}, metadata)
-    LangChain.Presence.track(@presence_module, topic, viewer_id, pid, full_metadata)
+    Sagents.Presence.track(@presence_module, topic, viewer_id, pid, full_metadata)
   end
 
   @doc """
@@ -314,7 +314,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   """
   def untrack_conversation_viewer(conversation_id, viewer_id, pid) do
     topic = presence_topic(conversation_id)
-    LangChain.Presence.untrack(@presence_module, topic, viewer_id, pid)
+    Sagents.Presence.untrack(@presence_module, topic, viewer_id, pid)
   end
 
   @doc """
@@ -324,7 +324,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   """
   def list_conversation_viewers(conversation_id) do
     topic = presence_topic(conversation_id)
-    LangChain.Presence.list(@presence_module, topic)
+    Sagents.Presence.list(@presence_module, topic)
   end
 
   @doc """

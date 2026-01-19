@@ -171,10 +171,10 @@ defmodule AgentsDemo.Conversations do
   state exists or if there are no todos.
 
   Reuses the same deserialization logic as full state restoration via
-  `LangChain.Agents.Todo.from_map/1`.
+  `Sagents.Todo.from_map/1`.
   """
   def load_todos(conversation_id) do
-    alias LangChain.Agents.Todo
+    alias Sagents.Todo
 
     case load_agent_state(conversation_id) do
       {:ok, %{"state" => %{"todos" => todos}}} when is_list(todos) ->

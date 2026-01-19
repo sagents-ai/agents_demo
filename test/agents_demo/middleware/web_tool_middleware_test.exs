@@ -2,7 +2,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
   use ExUnit.Case, async: true
 
   alias AgentsDemo.Middleware.WebToolMiddleware
-  alias LangChain.Agents.Agent
+  alias Sagents.Agent
   alias LangChain.ChatModels.ChatAnthropic
 
   describe "middleware behavior callbacks" do
@@ -23,7 +23,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
       assert is_map(config)
       assert config.agent_id == "test-agent-123"
       assert is_struct(config.model, ChatAnthropic)
-      assert is_struct(config.compiled_subagent, LangChain.Agents.SubAgent.Compiled)
+      assert is_struct(config.compiled_subagent, Sagents.SubAgent.Compiled)
       assert config.compiled_subagent.name == "web-lookup"
       assert config.timeout == 60_000
     end
@@ -589,7 +589,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
           mod -> mod
         end)
 
-      refute LangChain.Agents.Middleware.FileSystem in middleware_modules
+      refute Sagents.Middleware.FileSystem in middleware_modules
     end
 
     test "subagent only has web-related tools", %{config: config} do

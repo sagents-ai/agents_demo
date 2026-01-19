@@ -2,7 +2,7 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
   use ExUnit.Case, async: true
 
   alias AgentsDemo.Middleware.InjectCurrentTime
-  alias LangChain.Agents.State
+  alias Sagents.State
   alias LangChain.Message
   alias LangChain.Message.ContentPart
 

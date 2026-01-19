@@ -11,9 +11,9 @@ defmodule AgentsDemo.Agents.DemoSetup do
   according to your application's needs.
   """
 
-  alias LangChain.Agents.FileSystem
-  alias LangChain.Agents.FileSystem.FileSystemConfig
-  alias LangChain.Agents.FileSystem.Persistence.Disk
+  alias Sagents.FileSystem
+  alias Sagents.FileSystem.FileSystemConfig
+  alias Sagents.FileSystem.Persistence.Disk
 
   require Logger
 

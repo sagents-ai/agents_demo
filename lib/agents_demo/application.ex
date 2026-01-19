@@ -14,11 +14,9 @@ defmodule AgentsDemo.Application do
       {DNSCluster, query: Application.get_env(:agents_demo, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: AgentsDemo.PubSub},
       AgentsDemoWeb.Presence,
-      # Start the Registry for agent processes
-      # Agents start on-demand via Coordinator when conversations are accessed
-      {Registry, keys: :unique, name: LangChain.Agents.Registry},
       # Start the FileSystemSupervisor for managing user filesystems
-      LangChain.Agents.FileSystem.FileSystemSupervisor,
+      # Note: Sagents.Registry is started automatically by the sagents application
+      Sagents.FileSystem.FileSystemSupervisor,
       # Start to serve requests, typically the last entry
       AgentsDemoWeb.Endpoint
     ]

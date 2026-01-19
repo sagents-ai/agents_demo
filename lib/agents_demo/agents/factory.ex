@@ -7,8 +7,8 @@ defmodule AgentsDemo.Agents.Factory do
   """
 
   alias LangChain.ChatModels.ChatAnthropic
-  alias LangChain.Agents.Agent
-  alias LangChain.Agents.Middleware.ConversationTitle
+  alias Sagents.Agent
+  alias Sagents.Middleware.ConversationTitle
   alias AgentsDemo.Middleware.WebToolMiddleware
   alias AgentsDemo.Middleware.InjectCurrentTime
   alias LangChain.Utils.BedrockConfig
@@ -99,10 +99,10 @@ defmodule AgentsDemo.Agents.Factory do
     filesystem_middleware =
       if filesystem_scope do
         # Scope-based filesystem (references independently-running filesystem)
-        {LangChain.Agents.Middleware.FileSystem, [filesystem_scope: filesystem_scope]}
+        {Sagents.Middleware.FileSystem, [filesystem_scope: filesystem_scope]}
       else
         # Default behavior (agent-scoped filesystem)
-        LangChain.Agents.Middleware.FileSystem
+        Sagents.Middleware.FileSystem
       end
 
     # Use the full middleware stack that matches application.ex
@@ -119,13 +119,13 @@ defmodule AgentsDemo.Agents.Factory do
     #   - InjectCurrentTime: Subagents don't need timestamp injection since they're
     #     ephemeral and inherit any required temporal context from the parent agent
     subagent_middleware =
-      {LangChain.Agents.Middleware.SubAgent,
+      {Sagents.Middleware.SubAgent,
        [
          block_middleware: [
            AgentsDemo.Middleware.WebToolMiddleware,
            AgentsDemo.Middleware.InjectCurrentTime,
-           LangChain.Agents.Middleware.Summarization,
-           LangChain.Agents.Middleware.ConversationTitle
+           Sagents.Middleware.Summarization,
+           Sagents.Middleware.ConversationTitle
          ]
        ]}
 
@@ -133,18 +133,18 @@ defmodule AgentsDemo.Agents.Factory do
     # before other middleware processes user messages
     base_middleware = [
       {InjectCurrentTime, [timezone: timezone]},
-      LangChain.Agents.Middleware.TodoList,
+      Sagents.Middleware.TodoList,
       filesystem_middleware,
       subagent_middleware,
-      LangChain.Agents.Middleware.Summarization,
-      LangChain.Agents.Middleware.PatchToolCalls
+      Sagents.Middleware.Summarization,
+      Sagents.Middleware.PatchToolCalls
     ]
 
     # Add HumanInTheLoop if interrupts configured
     middleware =
       if interrupt_on do
         base_middleware ++
-          [{LangChain.Agents.Middleware.HumanInTheLoop, [interrupt_on: interrupt_on]}]
+          [{Sagents.Middleware.HumanInTheLoop, [interrupt_on: interrupt_on]}]
       else
         base_middleware
       end

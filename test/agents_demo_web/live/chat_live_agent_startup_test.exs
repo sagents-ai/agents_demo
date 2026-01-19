@@ -15,7 +15,7 @@ defmodule AgentsDemoWeb.ChatLiveAgentStartupTest do
   import Phoenix.LiveViewTest
   import AgentsDemo.AccountsFixtures
 
-  alias LangChain.Agents.AgentServer
+  alias Sagents.AgentServer
 
   require Logger
 

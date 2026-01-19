@@ -27,7 +27,7 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
         # ... other middleware
       ]
   """
-  @behaviour LangChain.Agents.Middleware
+  @behaviour Sagents.Middleware
 
   alias LangChain.Message
 

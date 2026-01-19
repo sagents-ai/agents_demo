@@ -73,13 +73,13 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
   See `test/agents_demo/middleware/web_tool_middleware_test.exs` for 58
   comprehensive tests covering all functionality, validation, and edge cases.
   """
-  @behaviour LangChain.Agents.Middleware
+  @behaviour Sagents.Middleware
 
   @default_timeout 60_000
 
   require Logger
   alias LangChain.Function
-  alias LangChain.Agents.SubAgent
+  alias Sagents.SubAgent
 
   @system_prompt """
   ## Web Lookup Tool
@@ -230,7 +230,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
 
     # Call the public SubAgent.start_subagent/5 function
     # This handles spawning, execution, and cleanup
-    case LangChain.Agents.Middleware.SubAgent.start_subagent(
+    case Sagents.Middleware.SubAgent.start_subagent(
            instructions,
            "web-lookup",
            subagent_args,
@@ -259,7 +259,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
   defp build_web_lookup_agent(model) do
     # Build an agent with custom tools for web lookup
     # This agent has NO middleware, only the specific tools it needs
-    LangChain.Agents.Agent.new!(
+    Sagents.Agent.new!(
       %{
         model: model,
         base_system_prompt: web_lookup_system_prompt(),

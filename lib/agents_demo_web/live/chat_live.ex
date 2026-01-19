@@ -4,8 +4,8 @@ defmodule AgentsDemoWeb.ChatLive do
 
   require Logger
 
-  alias LangChain.Agents.AgentServer
-  alias LangChain.Agents.FileSystemServer
+  alias Sagents.AgentServer
+  alias Sagents.FileSystemServer
   alias LangChain.Message
   alias LangChain.MessageDelta
   alias AgentsDemo.Conversations

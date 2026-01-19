@@ -29,7 +29,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
   import Phoenix.LiveViewTest
   import AgentsDemo.AccountsFixtures
 
-  alias LangChain.Agents.AgentServer
+  alias Sagents.AgentServer
   alias LangChain.ChatModels.ChatAnthropic
   alias LangChain.Message
   alias LangChain.Message.ToolCall
