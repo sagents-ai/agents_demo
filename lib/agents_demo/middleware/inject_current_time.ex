@@ -61,12 +61,6 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
   end
 
   @impl true
-  def tools(_config), do: []
-
-  @impl true
-  def state_schema, do: []
-
-  @impl true
   def before_model(state, config) do
     # Find and modify user messages to prepend timestamp
     # We only modify the LAST user message to avoid re-timestamping historical messages
@@ -74,15 +68,6 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
 
     {:ok, %{state | messages: updated_messages}}
   end
-
-  @impl true
-  def after_model(state, _config), do: {:ok, state}
-
-  @impl true
-  def handle_message(_message, state, _config), do: {:ok, state}
-
-  @impl true
-  def on_server_start(state, _config), do: {:ok, state}
 
   # Private helpers
 
