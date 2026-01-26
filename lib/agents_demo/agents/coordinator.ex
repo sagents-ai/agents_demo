@@ -1,94 +1,191 @@
 defmodule AgentsDemo.Agents.Coordinator do
   @moduledoc """
-  Coordinates the lifecycle of conversation-centric agents.
+  Coordinates agent lifecycle for conversation-centric agents.
 
-  This module provides a unified entry point for:
-  - Creating agents with proper agent_id management
-  - Starting agent sessions tied to conversations
-  - Loading/restoring conversation state
-  - Managing agent_id → conversation_id mapping
-
-  ## Design Philosophy
-
-  Each conversation gets its own agent process with:
-  - agent_id = "conversation-{conversation_id}"
-  - Agent configuration from code (via Factory)
-  - State from database (if restoring)
+  This module provides a single entry point for starting and stopping
+  conversation-specific agents, handling agent_id generation, state
+  loading, and race condition management.
 
   ## Usage
 
-      # Start a session for a conversation
-      {:ok, session} = Coordinator.start_conversation_session(conversation_id)
+      # Start or resume a conversation agent with explicit scope
+      scope = {:user, current_user.id}
+      {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
+        conversation_id,
+        scope: scope
+      )
 
-      # Send messages (agent_id managed internally)
+      # Subscribe to agent events
+      AgentServer.subscribe(session.agent_id)
+
+      # Send message
       AgentServer.add_message(session.agent_id, message)
 
-      # Stop session when done
-      Coordinator.stop_conversation_session(conversation_id)
+      # Stop agent (optional - agents auto-timeout)
+      AgentsDemo.Agents.Coordinator.stop_conversation_session(conversation_id)
+
+  ## LiveView Integration
+
+  The agents_demo application demonstrates the correct integration pattern.
+  See `agents_demo/lib/agents_demo_web/live/chat_live.ex` for a complete example.
+
+  ### Key Integration Points
+
+  **1. In mount - Initialize filesystem scope:**
+
+      def mount(_params, _session, socket) do
+        user_id = socket.assigns.current_scope.user.id
+        filesystem_scope = {:user, user_id}
+
+        # Optional: Initialize user's filesystem server (if using FileSystemServer)
+        if connected?(socket) do
+          case DemoSetup.ensure_user_filesystem(user_id) do
+            {:ok, _fs_scope} ->
+              FileSystemServer.subscribe(filesystem_scope)
+            {:error, reason} ->
+              Logger.warning("Failed to start user filesystem: \#{inspect(reason)}")
+          end
+        end
+
+        {:ok,
+         socket
+         |> assign(:filesystem_scope, filesystem_scope)
+         # ... other assigns
+        }
+      end
+
+  **2. When sending messages - Pass scope explicitly:**
+
+      def handle_event("send_message", %%{"message" => message_text}, socket) do
+        conversation_id = socket.assigns.conversation_id
+        filesystem_scope = socket.assigns.filesystem_scope
+
+        # Start agent session with explicit scope
+        case AgentsDemo.Agents.Coordinator.start_conversation_session(conversation_id,
+               scope: filesystem_scope
+             ) do
+          {:ok, session} ->
+            # Create and add message to agent
+            message = Message.new_user!(message_text)
+            AgentServer.add_message(session.agent_id, message)
+
+          {:error, reason} ->
+            # Handle error...
+        end
+      end
+
+  **3. When creating new conversations - Scope already known:**
+
+      defp create_new_conversation(socket, first_message_text) do
+        scope = socket.assigns.current_scope
+
+        case Conversations.create_conversation(scope, %%{title: title}) do
+          {:ok, conversation} ->
+            # Conversation created - filesystem_scope already in socket assigns
+            # Will be used when start_conversation_session is called
+
+          {:error, changeset} ->
+            # Handle error...
+        end
+      end
+
+  **Key Points:**
+  - Filesystem scope is determined at mount time from user context
+  - Scope is stored in socket assigns and passed explicitly to Coordinator
+  - No database lookups needed to determine scope - it flows from the top down
+  - First-time users work perfectly because scope comes from session, not DB
+
+  ## Configuration
+
+  Customize this module for your application:
+  - Change agent_id mapping strategy in `conversation_agent_id/1`
+  - Modify inactivity timeout in `start_conversation_session/2`
+  - Add custom lifecycle hooks (telemetry, logging, permissions)
+
   """
 
-  alias __MODULE__
   alias Sagents.{State, AgentServer, AgentSupervisor}
   alias LangChain.Message
-  alias LangChain.Message.DisplayHelpers
-  alias AgentsDemo.{Conversations, Agents.Factory}
-
+  alias Sagents.Message.DisplayHelpers
   require Logger
 
   # PubSub configuration - single source of truth
   @pubsub_module Phoenix.PubSub
   @pubsub_name AgentsDemo.PubSub
 
-  # Presence module for tracking conversation viewers
+  # Presence configuration for tracking conversation viewers
   @presence_module AgentsDemoWeb.Presence
 
-  # Default inactivity timeout
+  # Default inactivity timeout (can be overridden per session)
   @inactivity_timeout_minutes 10
 
   @doc """
-  Start an agent session for a conversation.
+  Starts or resumes an agent session for a conversation.
 
-  Creates the agent, loads/creates state, and starts the AgentServer.
-  This is the recommended entry point for conversation-based agent sessions.
-
-  This function is idempotent - calling it multiple times for the same
-  conversation returns the same session without error.
+  This function is idempotent - safe to call multiple times.
+  If the agent is already running, returns the existing session.
 
   ## Options
 
-  - `:interrupt_on` - Map of tool names to interrupt configuration
-  - `:user` - Current user struct (for audit/permissions)
-  - `:filesystem_scope` - Scope tuple for filesystem reference (e.g., {:user, 123}) (optional)
-  - `:timezone` - IANA timezone string for timestamp injection (e.g., "America/Denver") (optional, default: "UTC")
-  - `:inactivity_timeout` - Timeout in milliseconds for automatic shutdown (optional, default: 1 hour)
+  - `:scope` - Required. Filesystem scope tuple (e.g., `{:user, user_id}`)
+  - `:inactivity_timeout` - Milliseconds before agent stops (default: 10 minutes)
+  - `:factory_opts` - Additional options passed to your Factory module (e.g., `:timezone` for custom middleware)
 
   ## Returns
 
-  - `{:ok, session}` - Session info with agent_id and server_pid
+  - `{:ok, session}` - Session info (whether just started or already running)
   - `{:error, reason}` - Failed to start
 
   ## Examples
 
-      # Start new conversation agent (in-memory only)
-      {:ok, session} = Coordinator.start_conversation_session(123)
-      # => %{agent_id: "conversation-123", pid: #PID<...>, conversation_id: 123}
+      # Standard usage - pass the scope explicitly
+      scope = {:user, current_user.id}
+      {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
+        conversation_id,
+        scope: scope
+      )
 
-      # With filesystem scope (references independently-running filesystem)
-      {:ok, scope} = DemoSetup.ensure_user_filesystem(user_id)
-      {:ok, session} = Coordinator.start_conversation_session(123, filesystem_scope: scope)
+      # Custom inactivity timeout (30 minutes)
+      {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
+        conversation_id,
+        scope: {:user, user_id},
+        inactivity_timeout: :timer.minutes(30)
+      )
 
-      # Already running? Returns same session
-      {:ok, session} = Coordinator.start_conversation_session(123)
-      # => %{agent_id: "conversation-123", pid: #PID<...>, conversation_id: 123}
+      # With custom factory options (e.g., for timezone-aware middleware)
+      {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
+        conversation_id,
+        scope: scope,
+        factory_opts: [timezone: "America/New_York"]
+      )
+
   """
   def start_conversation_session(conversation_id, opts \\ []) do
+    # Validate required scope
+    scope = case Keyword.fetch(opts, :scope) do
+      {:ok, scope_value} -> scope_value
+      :error ->
+        raise ArgumentError, """
+        Missing required :scope option.
+
+        Please pass the scope to use for the filesystem when starting a session:
+
+            AgentsDemo.Agents.Coordinator.start_conversation_session(
+              conversation_id,
+              scope: {:user, user_id}
+            )
+        """
+    end
+
     agent_id = conversation_agent_id(conversation_id)
 
     case AgentServer.get_pid(agent_id) do
       nil ->
-        do_start_session(conversation_id, agent_id, opts)
+        do_start_session(conversation_id, agent_id, scope, opts)
 
       pid ->
+        Logger.debug("Agent session already running for conversation #{conversation_id}")
+
         {:ok,
          %{
            agent_id: agent_id,
@@ -99,30 +196,24 @@ defmodule AgentsDemo.Agents.Coordinator do
   end
 
   @doc """
-  Stop an agent session for a conversation.
+  Stops an agent session for a conversation.
 
-  Stops the AgentServer (which also stops the AgentSupervisor tree).
-  State should be persisted before calling this if needed.
+  Note: Agents automatically stop after inactivity timeout.
+  Only call this for explicit cleanup (e.g., conversation archival).
   """
   def stop_conversation_session(conversation_id) do
     agent_id = conversation_agent_id(conversation_id)
-    # Stopping AgentServer will stop the entire AgentSupervisor tree
-    AgentServer.stop(agent_id)
-    :ok
+
+    case AgentServer.get_pid(agent_id) do
+      nil -> {:ok, :not_running}
+      _pid ->
+        AgentServer.stop(agent_id)
+        {:ok, :stopped}
+    end
   end
 
   @doc """
-  Get the agent_id for a conversation.
-
-  This encapsulates the mapping strategy (conversation-centric model).
-  Returns the conversation_id as-is (a string UUID).
-  """
-  def conversation_agent_id(conversation_id) do
-    conversation_id
-  end
-
-  @doc """
-  Check if an agent session is running for a conversation.
+  Checks if an agent session is currently running.
   """
   def session_running?(conversation_id) do
     agent_id = conversation_agent_id(conversation_id)
@@ -130,63 +221,29 @@ defmodule AgentsDemo.Agents.Coordinator do
   end
 
   @doc """
-  Create an agent for a conversation without starting it.
+  Maps a conversation ID to an agent ID.
 
-  Useful for testing or when you need the agent struct separately.
+  ## Customization
+
+  Change this function to implement different mapping strategies:
+
+      # User-centric agents (one agent per user)
+      def conversation_agent_id(conversation_id) do
+        user_id = Conversations.get_user_id(conversation_id)
+        "user-\#{user_id}"
+      end
+
+      # Conversation-centric with prefix (current)
+      def conversation_agent_id(conversation_id) do
+        "conversation-\#{conversation_id}"
+      end
+
+      # Simple pass-through
+      def conversation_agent_id(conversation_id), do: conversation_id
+
   """
-  def create_conversation_agent(conversation_id, opts \\ []) do
-    agent_id = conversation_agent_id(conversation_id)
-    Factory.create_demo_agent(Keyword.put(opts, :agent_id, agent_id))
-  end
-
-  @doc """
-  Create a state for a conversation, loading from DB if exists.
-
-  Note: The library automatically injects agent_id, so we don't need to set it
-  when creating fresh states. For deserialization, we still need to provide it
-  since agent_id is not persisted.
-  """
-  def create_conversation_state(conversation_id) do
-    agent_id = conversation_agent_id(conversation_id)
-
-    case Conversations.load_agent_state(conversation_id) do
-      {:ok, exported_state} ->
-        Logger.info("Found saved state for conversation #{conversation_id}, attempting to restore...")
-
-        # exported_state has structure: %{"version" => 1, "state" => %{"messages" => [...], ...}}
-        # We need to pass just the nested "state" field to the deserializer
-        nested_state = exported_state["state"]
-
-        if is_nil(nested_state) do
-          Logger.warning(
-            "Exported state for conversation #{conversation_id} has no 'state' field, using fresh state"
-          )
-
-          {:ok, State.new!(%{})}
-        else
-          # Deserialize with proper agent_id (agent_id is not serialized)
-          case State.from_serialized(agent_id, nested_state) do
-            {:ok, state} ->
-              Logger.info(
-                "Successfully restored agent state for conversation #{conversation_id} with #{length(state.messages)} messages"
-              )
-
-              {:ok, state}
-
-            {:error, reason} ->
-              Logger.warning(
-                "Failed to deserialize agent state for conversation #{conversation_id}: #{inspect(reason)}, using fresh state"
-              )
-
-              {:ok, State.new!(%{})}
-          end
-        end
-
-      {:error, :not_found} ->
-        Logger.info("No saved state found for conversation #{conversation_id}, creating fresh state")
-        # Create fresh state - library will inject agent_id automatically
-        {:ok, State.new!(%{})}
-    end
+  def conversation_agent_id(conversation_id) do
+    "conversation-#{conversation_id}"
   end
 
   @doc """
@@ -310,7 +367,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   ## Examples
 
       # When switching conversations
-      Coordinator.untrack_conversation_viewer(old_conversation_id, user.id, self())
+      AgentsDemo.Agents.Coordinator.untrack_conversation_viewer(old_conversation_id, user.id, self())
   """
   def untrack_conversation_viewer(conversation_id, viewer_id, pid) do
     topic = presence_topic(conversation_id)
@@ -340,7 +397,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   @doc """
   Get the PubSub name used by this coordinator.
 
-  Returns the atom name of the PubSub server (e.g., AgentsDemo.PubSub).
+  Returns the atom name of the PubSub server.
   """
   def pubsub_name do
     @pubsub_name
@@ -370,31 +427,28 @@ defmodule AgentsDemo.Agents.Coordinator do
 
       # User message
       message = Message.new_user!("Hello")
-      {:ok, [display_msg]} = Coordinator.save_message(conversation_id, message)
+      {:ok, [display_msg]} = AgentsDemo.Agents.Coordinator.save_message(conversation_id, message)
 
       # Assistant message with text and tool calls
       message = Message.new_assistant!(%{
         content: "Let me search...",
         tool_calls: [ToolCall.new!(%{...})]
       })
-      {:ok, [text_msg, tool_call_msg]} = Coordinator.save_message(conversation_id, message)
+      {:ok, [text_msg, tool_call_msg]} = AgentsDemo.Agents.Coordinator.save_message(conversation_id, message)
   """
   def save_message(conversation_id, %Message{} = message) do
-    Logger.debug("Coordinator.save_message called for conversation #{conversation_id}, message role: #{message.role}")
+    Logger.debug("#{__MODULE__}.save_message called for conversation #{conversation_id}, message role: #{message.role}")
 
     # Use library helper to extract displayable items
     display_items = DisplayHelpers.extract_display_items(message)
     Logger.debug("Extracted #{length(display_items)} display items from message")
 
-    # Warn if no content (shouldn't happen, but good to track)
     if Enum.empty?(display_items) do
       Logger.warning("Received Message with no displayable content: #{inspect(message)}")
-      {:ok, []}  # Return empty list, nothing to save or display
+      {:ok, []}
     else
-      # Convert and persist each item, stopping on first error
       result =
         Enum.reduce_while(display_items, {:ok, []}, fn item, {:ok, acc} ->
-          # Convert atom keys to string keys for Conversations.append_display_message/2
           attrs = %{
             "message_type" => Atom.to_string(item.message_type),
             "content_type" => Atom.to_string(item.type),
@@ -403,15 +457,13 @@ defmodule AgentsDemo.Agents.Coordinator do
 
           Logger.debug("Attempting to save display message: type=#{attrs["content_type"]}, message_type=#{attrs["message_type"]}")
 
-          case Conversations.append_display_message(conversation_id, attrs) do
+          case AgentsDemo.Conversations.append_display_message(conversation_id, attrs) do
             {:ok, display_msg} ->
               Logger.debug("Successfully persisted DisplayMessage id=#{display_msg.id}")
               {:cont, {:ok, acc ++ [display_msg]}}
 
             {:error, reason} ->
-              Logger.error(
-                "Failed to persist DisplayMessage (#{attrs["content_type"]}): #{inspect(reason)}"
-              )
+              Logger.error("Failed to persist DisplayMessage (#{attrs["content_type"]}): #{inspect(reason)}")
               {:halt, {:error, reason}}
           end
         end)
@@ -427,7 +479,7 @@ defmodule AgentsDemo.Agents.Coordinator do
     end
   end
 
-  ## Private Functions
+  # Private Functions
 
   # Private helper for agent PubSub topic naming
   defp agent_topic(agent_id) do
@@ -439,34 +491,30 @@ defmodule AgentsDemo.Agents.Coordinator do
     "conversation:#{conversation_id}"
   end
 
-  defp do_start_session(conversation_id, agent_id, opts) do
-    Logger.info("Starting agent session for conversation #{conversation_id}")
+  defp do_start_session(conversation_id, agent_id, scope, opts) do
+    Logger.info("Starting agent session for conversation #{conversation_id} with scope #{inspect(scope)}")
 
-    # 1. Extract filesystem_scope and timezone from options
-    filesystem_scope = Keyword.get(opts, :filesystem_scope)
+    # 1. Extract options
     timezone = Keyword.get(opts, :timezone, "UTC")
+    factory_opts = Keyword.get(opts, :factory_opts, [])
 
-    # 2. Create agent from factory (configuration from code) with filesystem_scope and timezone
-    factory_opts =
-      opts
+    # 2. Create agent from factory (configuration from code)
+    # Pass the explicit filesystem scope to the Factory
+    merged_factory_opts =
+      factory_opts
       |> Keyword.put(:agent_id, agent_id)
-      |> Keyword.put(:filesystem_scope, filesystem_scope)
+      |> Keyword.put(:filesystem_scope, scope)
       |> Keyword.put(:timezone, timezone)
 
-    {:ok, agent} = Factory.create_demo_agent(factory_opts)
+    {:ok, agent} = AgentsDemo.Agents.Factory.create_agent(merged_factory_opts)
 
     # 3. Load or create state (data from database)
     {:ok, state} = create_conversation_state(conversation_id)
 
     # 4. Extract configuration from options
-    # Default to 10 minutes of inactivity before automatic shutdown
     inactivity_timeout = Keyword.get(opts, :inactivity_timeout, :timer.minutes(@inactivity_timeout_minutes))
 
     # 5. Start the AgentSupervisor with proper configuration
-    # Use start_link_sync to ensure AgentServer is ready before returning
-    # This prevents race conditions where subscribers try to connect before the agent is ready
-    # CRITICAL: Must provide unique name for each supervisor based on agent_id
-    # Without this, all supervisors try to register with the same default name causing collisions
     supervisor_name = AgentSupervisor.get_name(agent_id)
 
     # Configure presence tracking for smart shutdown
@@ -481,19 +529,16 @@ defmodule AgentsDemo.Agents.Coordinator do
       agent: agent,
       initial_state: state,
       pubsub: {@pubsub_module, @pubsub_name},
-      # Enable debug event broadcasting
       debug_pubsub: {@pubsub_module, @pubsub_name},
       inactivity_timeout: inactivity_timeout,
       presence_tracking: presence_tracking,
-      # Enable presence-based agent discovery for debugger
       presence_module: @presence_module,
       conversation_id: conversation_id,
-      save_new_message_fn: &Coordinator.save_message/2
+      save_new_message_fn: &__MODULE__.save_message/2
     ]
 
     case AgentSupervisor.start_link_sync(supervisor_config) do
       {:ok, _supervisor_pid} ->
-        # AgentServer is guaranteed to be ready now
         pid = AgentServer.get_pid(agent_id)
 
         {:ok,
@@ -505,7 +550,6 @@ defmodule AgentsDemo.Agents.Coordinator do
 
       {:error, {:already_started, _supervisor_pid}} ->
         # Race condition - someone else started it
-        # Return :ok tuple for consistent API (idempotent)
         pid = AgentServer.get_pid(agent_id)
 
         {:ok,
@@ -518,6 +562,45 @@ defmodule AgentsDemo.Agents.Coordinator do
       {:error, reason} ->
         Logger.error("Failed to start agent session: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  defp create_conversation_state(conversation_id) do
+    agent_id = conversation_agent_id(conversation_id)
+
+    case AgentsDemo.Conversations.load_agent_state(conversation_id) do
+      {:ok, exported_state} ->
+        Logger.info("Found saved state for conversation #{conversation_id}, attempting to restore...")
+
+        nested_state = exported_state["state"]
+
+        if is_nil(nested_state) do
+          Logger.warning(
+            "Exported state for conversation #{conversation_id} has no 'state' field, using fresh state"
+          )
+
+          {:ok, State.new!(%{})}
+        else
+          case State.from_serialized(agent_id, nested_state) do
+            {:ok, state} ->
+              Logger.info(
+                "Successfully restored agent state for conversation #{conversation_id} with #{length(state.messages)} messages"
+              )
+
+              {:ok, state}
+
+            {:error, reason} ->
+              Logger.warning(
+                "Failed to deserialize agent state for conversation #{conversation_id}: #{inspect(reason)}, using fresh state"
+              )
+
+              {:ok, State.new!(%{})}
+          end
+        end
+
+      {:error, :not_found} ->
+        Logger.info("No saved state found for conversation #{conversation_id}, creating fresh state")
+        {:ok, State.new!(%{})}
     end
   end
 end

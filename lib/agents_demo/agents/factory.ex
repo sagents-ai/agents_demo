@@ -1,195 +1,415 @@
 defmodule AgentsDemo.Agents.Factory do
   @moduledoc """
-  Factory for creating agents with appropriate middleware and tools.
+  Factory for creating agents with consistent configuration.
 
-  This module centralizes agent creation logic, ensuring consistency
-  between new conversations and restored conversations.
+  This module centralizes agent creation, ensuring all agents use the same
+  model, middleware stack, and base configuration. The Coordinator calls
+  `create_agent/1` when starting a conversation session.
+
+  This Factory is automatically configured for your persistence layer:
+  - Owner type: :user
+  - Owner field: user_id
+  - Conversations context: AgentsDemo.Conversations
+
+  ## Customization
+
+  - Change model provider in `get_model_config/0`
+  - Configure fallbacks in `get_fallback_models/0`
+  - Configure title generation model in `get_title_model/0`
+  - Modify system prompt in `base_system_prompt/0`
+  - Add/remove middleware in `build_middleware/3`
+  - Add custom tools in `create_agent/1` under the `:tools` key
+  - Configure HITL in `default_interrupt_on/0`
+
+  ## Understanding the Default Middleware
+
+  The middleware stack below replicates `Sagents.Agent.build_default_middleware/3`.
+  You can call that function in IEx to see the canonical defaults:
+
+      middleware = Sagents.Agent.build_default_middleware(model, "test-agent")
+
+  ## Model Fallback Strategy
+
+  The fallback configuration uses the *same model* on a different provider
+  for resilience without changing behavior:
+
+  | Primary Provider      | Fallback Provider       |
+  |-----------------------|-------------------------|
+  | ChatAnthropic (API)   | ChatAnthropic (Bedrock) |
+  | ChatOpenAI (API)      | ChatOpenAI (Azure)      |
+
+  ## Filesystem Scoping
+
+  The FileSystem middleware supports flexible scoping to control file isolation.
+
+  **For user-facing interactive agents (recommended):**
+  - **User-scoped**: `filesystem_scope: {:user, user_id}`
+    - Files persist across all conversations for the same user
+    - Enables true long-term memory and file accumulation
+    - This is the typical pattern for chat applications
+
+  **Other scoping options:**
+  - **Project-scoped**: `filesystem_scope: {:project, project_id}`
+    - Files shared within a project across multiple users and conversations
+
+  - **Agent-scoped**: `filesystem_scope: nil` (defaults to `{:agent, agent_id}`)
+    - Files isolated per conversation - typically too limiting for user-facing agents
+    - May be appropriate for non-interactive batch processing or isolated task execution
+
+  - **Custom scoping**: Use any tuple like `{:team, team_id}` or `{:session, session_id}`
+
+  **Important:** The Coordinator should pass the appropriate scope when calling `create_agent/1`.
+
   """
 
   alias LangChain.ChatModels.ChatAnthropic
+  # Uncomment for OpenAI:
+  # alias LangChain.ChatModels.ChatOpenAI
+  # Uncomment for Bedrock:
+  # alias LangChain.Utils.BedrockConfig
   alias Sagents.Agent
   alias Sagents.Middleware.ConversationTitle
+  alias Sagents.Middleware.HumanInTheLoop
   alias AgentsDemo.Middleware.WebToolMiddleware
   alias AgentsDemo.Middleware.InjectCurrentTime
-  alias LangChain.Utils.BedrockConfig
 
-  # New Anthropic models to use
-  @claude_model "claude-sonnet-4-5-20250929"
+  # ---------------------------------------------------------------------------
+  # Model Configuration (edit these module attributes to change models)
+  # ---------------------------------------------------------------------------
 
-  # Same models as used in Application
+  # Primary model for agent conversations
+  # See: https://docs.anthropic.com/en/docs/models-overview
+  @main_model "claude-sonnet-4-5-20250929"
+
+  # Title generation uses a lighter/faster model for cost efficiency
+  # Haiku is ~10x cheaper than Sonnet and sufficient for generating titles
   @title_model "claude-3-5-haiku-latest"
-  @title_fallback_model "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+  # Uncomment when using Bedrock fallback:
+  # @title_fallback_model "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+
+  # For OpenAI, uncomment and use:
+  # @main_model "gpt-4o"
+  # @title_model "gpt-4o-mini"
 
   @doc """
-  Creates an agent for the demo application.
+  Creates an agent with the standard configuration.
 
-  This function is used for both new and restored conversations.
-  The agent capabilities (middleware, tools, model) come from
-  current application code, not from the database.
+  ## Options
 
-  ## Parameters
-
-  - `opts` - Keyword list of options:
-    - `:agent_id` - Required. The agent's runtime identifier.
-    - `:interrupt_on` - Optional. Map of tool names to interrupt configs (default: write_file and delete_file).
-    - `:filesystem_scope` - Optional. Scope tuple for filesystem reference (e.g., {:user, 123}).
-    - `:timezone` - Optional. IANA timezone string for timestamp injection (default: "UTC").
+  - `:agent_id` - Required. Unique identifier for this agent.
+  - `:filesystem_scope` - Required. Scope tuple for filesystem isolation.
+    Examples: `{:user, user_id}`, `{:project, 456}`, `{:team, 789}`.
+    Pass `nil` for agent-scoped (isolated per conversation).
+  - `:timezone` - Optional. IANA timezone string (default: "UTC").
+  - `:interrupt_on` - Optional. Map of tool names requiring approval.
+    Pass `nil` to disable HITL entirely.
 
   ## Examples
 
-      # For new conversation
-      {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123")
+      # Standard usage with user scope
+      {:ok, agent} = Factory.create_agent(
+        agent_id: "conv-123",
+        filesystem_scope: {:user, user_id}
+      )
 
-      # For restored conversation (same function!)
-      {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123")
+      # Project-scoped filesystem
+      {:ok, agent} = Factory.create_agent(
+        agent_id: "conv-123",
+        filesystem_scope: {:project, project_id}
+      )
 
-      # With filesystem scope
-      {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123", filesystem_scope: {:user, 1})
+      # Agent-scoped (isolated per conversation)
+      {:ok, agent} = Factory.create_agent(
+        agent_id: "conv-123",
+        filesystem_scope: nil
+      )
 
-      # With timezone for timestamp injection
-      {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123", timezone: "America/Denver")
+      # With timezone and custom HITL
+      {:ok, agent} = Factory.create_agent(
+        agent_id: "conv-123",
+        filesystem_scope: {:user, user_id},
+        timezone: "America/New_York",
+        interrupt_on: %{
+          "write_file" => true,
+          "delete_file" => true,
+          "execute_command" => true
+        }
+      )
 
-      # Without human-in-the-loop
-      {:ok, agent} = Factory.create_demo_agent(agent_id: "demo-123", interrupt_on: nil)
   """
-  def create_demo_agent(opts \\ []) do
+  def create_agent(opts \\ []) do
     agent_id = Keyword.fetch!(opts, :agent_id)
-    # Default to requiring approval for file writes and deletes
-    interrupt_on = Keyword.get(opts, :interrupt_on, %{
-      "write_file" => false,
-      "delete_file" => true
-    })
-    filesystem_scope = Keyword.get(opts, :filesystem_scope)
+    filesystem_scope = Keyword.fetch!(opts, :filesystem_scope)
     timezone = Keyword.get(opts, :timezone, "UTC")
+    interrupt_on = Keyword.get(opts, :interrupt_on, default_interrupt_on())
 
-    # Get model configuration from environment
-    model = get_model_config()
-
-    # Build agent with current middleware from code
     Agent.new(
       %{
         agent_id: agent_id,
-        model: model,
-        base_system_prompt: """
-        You are a helpful AI assistant with access to a persistent memory system and web search capabilities.
-
-        You can read, write, and manage files in the /Memories directory.
-        You can search the web for current information using the web_lookup tool.
-
-        Be friendly, helpful, and demonstrate your capabilities when appropriate.
-        When users ask about current information, recent events, or facts that may have changed,
-        use the web_lookup tool to get accurate, up-to-date information.
-        """,
+        model: get_model_config(),
+        base_system_prompt: base_system_prompt(),
+        middleware: build_middleware(filesystem_scope, interrupt_on, timezone),
         name: "Demo Agent",
-        # Middleware is defined here in code, not loaded from database
-        middleware: build_demo_middleware(interrupt_on, filesystem_scope, timezone),
-        # Add any custom tools here
+        fallback_models: get_fallback_models(),
+        before_fallback: get_before_fallback(),
+        # Add any custom tools here (tools not provided by middleware)
         tools: []
       },
-      # IMPORTANT: Since we're explicitly specifying ALL middleware above,
-      # we must tell Agent.new not to add default middleware again
+      # Since we specify the full middleware stack, don't add defaults
       replace_default_middleware: true
     )
   end
 
-  defp build_demo_middleware(interrupt_on, filesystem_scope, timezone) do
-    api_key = System.fetch_env!("ANTHROPIC_API_KEY")
+  # ---------------------------------------------------------------------------
+  # Model Configuration
+  # ---------------------------------------------------------------------------
 
-    # Configure FileSystem middleware based on scope
-    filesystem_middleware =
-      if filesystem_scope do
-        # Scope-based filesystem (references independently-running filesystem)
-        {Sagents.Middleware.FileSystem, [filesystem_scope: filesystem_scope]}
-      else
-        # Default behavior (agent-scoped filesystem)
-        Sagents.Middleware.FileSystem
-      end
+  # Primary model configuration.
+  # Modify this function to switch providers or models.
+  defp get_model_config do
+    ChatAnthropic.new!(%{
+      model: @main_model,
+      api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
+      stream: true
+    })
 
-    # Use the full middleware stack that matches application.ex
-    # This ensures consistency between new and restored conversations
-    #
-    # Note: SubAgent middleware is configured with block_middleware to prevent
-    # certain middleware from being inherited by general-purpose subagents.
-    # This is important for:
-    #   - WebToolMiddleware: Subagents spawning web lookups that spawn more subagents
-    #   - Summarization: Short-lived subagents don't need conversation summarization;
-    #     it wastes tokens and adds latency for tasks that complete quickly
-    #   - ConversationTitle: Subagents don't need titles since they're ephemeral
-    #     and their results are returned to the parent agent
-    #   - InjectCurrentTime: Subagents don't need timestamp injection since they're
-    #     ephemeral and inherit any required temporal context from the parent agent
-    subagent_middleware =
-      {Sagents.Middleware.SubAgent,
-       [
-         block_middleware: [
-           AgentsDemo.Middleware.WebToolMiddleware,
-           AgentsDemo.Middleware.InjectCurrentTime,
-           Sagents.Middleware.Summarization,
-           Sagents.Middleware.ConversationTitle
-         ]
-       ]}
-
-    # InjectCurrentTime is positioned early to ensure timestamps are added
-    # before other middleware processes user messages
-    base_middleware = [
-      {InjectCurrentTime, [timezone: timezone]},
-      Sagents.Middleware.TodoList,
-      filesystem_middleware,
-      subagent_middleware,
-      Sagents.Middleware.Summarization,
-      Sagents.Middleware.PatchToolCalls
-    ]
-
-    # Add HumanInTheLoop if interrupts configured
-    middleware =
-      if interrupt_on do
-        base_middleware ++
-          [{Sagents.Middleware.HumanInTheLoop, [interrupt_on: interrupt_on]}]
-      else
-        base_middleware
-      end
-
-    # Add application-specific middleware (WebTool and ConversationTitle)
-    middleware ++
-      [
-        WebToolMiddleware,
-        {ConversationTitle,
-         [
-           chat_model: get_title_model(api_key),
-           fallbacks: get_title_fallbacks()
-         ]}
-      ]
+    # OpenAI alternative:
+    # ChatOpenAI.new!(%{
+    #   model: @main_model,
+    #   api_key: System.fetch_env!("OPENAI_API_KEY"),
+    #   stream: true
+    # })
   end
 
-  # Get the primary title generation model (matches application.ex)
-  defp get_title_model(api_key) do
+  # Fallback models - same model on different infrastructure for resilience.
+  # These are used when the primary provider is unavailable.
+  #
+  # This function is called by create_agent/1 and passed to the Agent struct.
+  #
+  # Note: To use Bedrock fallback, configure AWS credentials in config.exs:
+  #
+  #   config :langchain, :bedrock,
+  #     aws_access_key_id: System.get_env("AWS_ACCESS_KEY_ID"),
+  #     aws_secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY"),
+  #     aws_region: System.get_env("AWS_REGION", "us-east-1")
+  #
+  # Then uncomment the BedrockConfig alias at the top of this file.
+  #
+  @doc """
+  Returns the list of fallback models to use when the primary model fails.
+
+  This is called automatically by `create_agent/1`. The fallback models are
+  used in order when the primary model encounters an error that should be
+  retried (rate limits, service unavailable, etc.).
+
+  **Cost Considerations:**
+  - Fallbacks are only used when the primary model fails
+  - Each fallback attempt incurs API costs
+  - Monitor your primary model's error rate to assess fallback usage
+  - Consider using cheaper models as fallbacks (e.g., Haiku instead of Sonnet)
+
+  See the implementation for examples of configuring Bedrock and Azure fallbacks.
+  """
+  def get_fallback_models do
+    [
+      # Anthropic via AWS Bedrock (same Claude model, different provider)
+      # Uncomment when Bedrock is configured:
+      # ChatAnthropic.new!(%{
+      #   model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      #   bedrock: BedrockConfig.from_application_env!(),
+      #   stream: true
+      # })
+
+      # OpenAI via Azure alternative:
+      # ChatOpenAI.new!(%{
+      #   model: @main_model,
+      #   endpoint: "https://your-resource.openai.azure.com",
+      #   api_key: System.fetch_env!("AZURE_OPENAI_API_KEY"),
+      #   api_version: "2024-02-15-preview"
+      # })
+    ]
+  end
+
+  @doc """
+  Returns an optional function to modify the chain before each LLM attempt.
+
+  This function is called before EVERY attempt, including the first. This makes
+  it useful for provider-specific modifications like:
+  - Swapping system prompts for different providers (Anthropic vs OpenAI formatting)
+  - Adjusting context or parameters based on the model
+  - Logging or telemetry per attempt
+
+  ## Function Signature
+
+  The function receives an `LLMChain.t()` and returns a modified `LLMChain.t()`:
+
+      fn %LLMChain{} = chain -> modified_chain end
+
+  ## Example: Provider-Specific System Prompts
+
+      def get_before_fallback do
+        fn chain ->
+          case chain.llm do
+            %ChatAnthropic{} ->
+              # Anthropic-specific system prompt
+              new_prompt = Message.new_system!("Anthropic-optimized prompt")
+              %LLMChain{chain | messages:
+                LangChain.Utils.replace_system_message!(chain.messages, new_prompt)}
+
+            %ChatOpenAI{} ->
+              # OpenAI-specific system prompt
+              new_prompt = Message.new_system!("OpenAI-optimized prompt")
+              %LLMChain{chain | messages:
+                LangChain.Utils.replace_system_message!(chain.messages, new_prompt)}
+
+            _ ->
+              chain
+          end
+        end
+      end
+
+  Returns a function `(LLMChain.t() -> LLMChain.t())` or `nil` to skip.
+  """
+  def get_before_fallback do
+    nil
+
+    # Example implementation (commented out):
+    # fn chain ->
+    #   # Example: Log which model is being attempted
+    #   Logger.debug("Attempting LLM call with \#{inspect(chain.llm)}")
+    #   chain
+    # end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Title Generation Model
+  # ---------------------------------------------------------------------------
+
+  # Title generation uses a lighter/faster model for cost efficiency.
+  # Haiku is ~10x cheaper than Sonnet and sufficient for generating titles.
+  defp get_title_model do
     ChatAnthropic.new!(%{
       model: @title_model,
-      api_key: api_key,
+      api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
       temperature: 1,
       stream: false
     })
   end
 
-  # Get the list of fallback title generation models (matches application.ex)
-  defp get_title_fallbacks() do
+  # Fallback models for title generation
+  defp get_title_fallbacks do
     [
-      ChatAnthropic.new!(%{
-        model: @title_fallback_model,
-        bedrock: BedrockConfig.from_application_env!(),
-        temperature: 1,
-        stream: false
-      })
+      # Uncomment when Bedrock is configured (also uncomment BedrockConfig alias):
+      # ChatAnthropic.new!(%{
+      #   model: @title_fallback_model,
+      #   bedrock: BedrockConfig.from_application_env!(),
+      #   temperature: 1,
+      #   stream: false
+      # })
     ]
   end
 
-  defp get_model_config do
-    ChatAnthropic.new!(%{
-      model: @claude_model,
-      api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
-      thinking: %{type: "enabled", budget_tokens: 2000},
-      temperature: 1,
-      stream: true
-    })
+  # ---------------------------------------------------------------------------
+  # System Prompt
+  # ---------------------------------------------------------------------------
+
+  # Base system prompt for all agents.
+  # Customize this for your agent's purpose and personality.
+  defp base_system_prompt do
+    """
+    You are a helpful AI assistant with access to a persistent memory system and web search capabilities.
+
+    You can read, write, and manage files in the /Memories directory.
+    You can search the web for current information using the web_lookup tool.
+
+    Be friendly, helpful, and demonstrate your capabilities when appropriate.
+    When users ask about current information, recent events, or facts that may have changed,
+    use the web_lookup tool to get accurate, up-to-date information.
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Human-in-the-Loop Configuration
+  # ---------------------------------------------------------------------------
+
+  # Default tools that require human approval before execution.
+  # Return `nil` or `%{}` to disable HITL entirely.
+  #
+  # Configuration options:
+  #   - `true` - Enable with default decisions (approve, edit, reject)
+  #   - `false` - No interruption for this tool
+  #   - `%{allowed_decisions: [:approve, :reject]}` - Custom decisions
+  #
+  defp default_interrupt_on do
+    %{
+      "delete_file" => true
+      # "write_file" => true,
+      # "execute_command" => true
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Middleware Configuration
+  # ---------------------------------------------------------------------------
+
+  # Build the middleware stack.
+  #
+  # This replicates the default stack from `Sagents.Agent.build_default_middleware/3`:
+  #   1. TodoList - Task management with write_todos tool
+  #   2. ConversationTitle - Auto-generate conversation titles (async, so positioned early)
+  #   3. FileSystem - Virtual filesystem (ls, read_file, write_file, etc.)
+  #   4. SubAgent - Delegate to specialized child agents
+  #   5. Summarization - Compress long conversations to stay within token limits
+  #   6. PatchToolCalls - Fix dangling tool calls from interrupted conversations
+  #
+  # HumanInTheLoop is conditionally added based on `interrupt_on` configuration.
+  #
+  # Order matters! Early middleware sees messages first (before_model) and
+  # processes responses last (after_model).
+  #
+  defp build_middleware(filesystem_scope, interrupt_on, timezone) do
+    [
+      # Task management - gives the agent a todo list for tracking work
+      Sagents.Middleware.TodoList,
+
+      # ConversationTitle - auto-generate titles after the first exchange.
+      # Positioned early because it's async and should start as soon as possible.
+      # Uses a lighter/faster model (Haiku) for cost efficiency.
+      {ConversationTitle, [
+        chat_model: get_title_model(),
+        fallbacks: get_title_fallbacks()
+      ]},
+
+      # Virtual filesystem - file operations with configurable scope
+      # For user-facing agents, pass {:user, user_id} from the Coordinator
+      # If nil, defaults to {:agent, agent_id} (isolated per conversation)
+      {Sagents.Middleware.FileSystem, [filesystem_scope: filesystem_scope]},
+
+      # SubAgent - spawn child agents for complex tasks
+      # Configure block_middleware to prevent certain middleware from being
+      # inherited by subagents (e.g., Summarization, ConversationTitle).
+      {Sagents.Middleware.SubAgent, [
+        block_middleware: [
+          AgentsDemo.Middleware.WebToolMiddleware,
+          AgentsDemo.Middleware.InjectCurrentTime,
+          Sagents.Middleware.Summarization,
+          Sagents.Middleware.ConversationTitle
+        ]
+      ]},
+
+      # Custom middleware that injects the current time into every user message
+      {InjectCurrentTime, [timezone: timezone]},
+
+      # Custom middleware that adds web_lookup tool that runs in a separate context
+      WebToolMiddleware,
+
+      # Summarization - compress long conversations to fit context window
+      Sagents.Middleware.Summarization,
+
+      # PatchToolCalls - fix dangling tool calls from interrupted conversations
+      Sagents.Middleware.PatchToolCalls
+    ]
+    # Conditionally add HumanInTheLoop if interrupt_on is configured.
+    |> HumanInTheLoop.maybe_append(interrupt_on)
   end
 end

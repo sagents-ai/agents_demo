@@ -16,6 +16,8 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
   - `"structured_data"` - Structured/formatted data (tables, JSON, etc.)
   - `"notification"` - System/UI notification
   - `"error"` - Error message
+  - `"tool_call"` - Tool invocation request from assistant
+  - `"tool_result"` - Tool execution result
 
   ## Content Structure
 
@@ -26,6 +28,8 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
   - Text: `%{"text" => "message"}`
   - Image: `%{"url" => "path"}` or `%{"data" => "base64...", "mime_type" => "image/png"}`
   - File: `%{"path" => "/path", "name" => "report.pdf"}`
+  - Tool call: `%{"call_id" => "call_123", "name" => "search", "arguments" => %{...}}`
+  - Tool result: `%{"tool_call_id" => "call_123", "name" => "search", "content" => "...", "is_error" => false}`
 
   ## Sequence Field (Message-Local Ordering)
 

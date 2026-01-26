@@ -142,7 +142,7 @@ defmodule AgentsDemoWeb.ChatLive do
       # Ensure agent is running (seamless start if not)
       # Coordinator.start_conversation_session is idempotent
       case Coordinator.start_conversation_session(conversation_id,
-             filesystem_scope: filesystem_scope,
+             scope: filesystem_scope,
              timezone: timezone
            ) do
         {:ok, session} ->

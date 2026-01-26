@@ -51,6 +51,7 @@ defmodule AgentsDemo.Conversations do
   alias AgentsDemo.Conversations.Conversation
   alias AgentsDemo.Conversations.DisplayMessage
   alias AgentsDemo.Accounts.Scope, as: Scope
+  alias LangChain.Message.ContentPart
   alias LangChain.Message.ToolCall
   alias LangChain.Message.ToolResult
 
@@ -311,10 +312,10 @@ defmodule AgentsDemo.Conversations do
   """
   def append_image_message(conversation_id, image_url, opts \\ []) do
     content = %{"url" => image_url}  # String keys!
-    content = if alt = Keyword.get(opts, :alt_text), do: Map.put(content, "alt_text", alt), else: content
-    content = if caption = Keyword.get(opts, :caption), do: Map.put(content, "caption", caption), else: content
+    content = if alt = opts[:alt_text], do: Map.put(content, "alt_text", alt), else: content
+    content = if caption = opts[:caption], do: Map.put(content, "caption", caption), else: content
 
-    message_type = Keyword.get(opts, :message_type, "assistant")
+    message_type = opts[:message_type] || "assistant"
 
     append_display_message(conversation_id, %{
       message_type: message_type,
@@ -344,16 +345,16 @@ defmodule AgentsDemo.Conversations do
   """
   def append_file_message(conversation_id, file_path, file_name, opts \\ []) do
     content = %{"path" => file_path, "name" => file_name}  # String keys!
-    content = if size = Keyword.get(opts, :size), do: Map.put(content, "size", size), else: content
-    content = if mime = Keyword.get(opts, :mime_type), do: Map.put(content, "mime_type", mime), else: content
+    content = if size = opts[:size], do: Map.put(content, "size", size), else: content
+    content = if mime = opts[:mime_type], do: Map.put(content, "mime_type", mime), else: content
 
-    message_type = Keyword.get(opts, :message_type, "tool")
+    message_type = opts[:message_type] || "tool"
 
     append_display_message(conversation_id, %{
       message_type: message_type,
       content_type: "file_reference",
       content: content,
-      metadata: Keyword.get(opts, :metadata, %{})
+      metadata: Map.get(opts, :metadata, %{})
     })
   end
 
@@ -383,15 +384,15 @@ defmodule AgentsDemo.Conversations do
   """
   def append_structured_data_message(conversation_id, format, data, opts \\ []) do
     content = %{"format" => format, "data" => data}  # String keys!
-    content = if columns = Keyword.get(opts, :columns), do: Map.put(content, "columns", columns), else: content
+    content = if columns = opts[:columns], do: Map.put(content, "columns", columns), else: content
 
-    message_type = Keyword.get(opts, :message_type, "tool")
+    message_type = opts[:message_type] || "tool"
 
     append_display_message(conversation_id, %{
       message_type: message_type,
       content_type: "structured_data",
       content: content,
-      metadata: Keyword.get(opts, :metadata, %{})
+      metadata: Map.get(opts, :metadata, %{})
     })
   end
 
@@ -412,9 +413,9 @@ defmodule AgentsDemo.Conversations do
         level: "info", details: %{"messages_removed" => 15})
   """
   def append_notification_message(conversation_id, text, opts \\ []) do
-    level = Keyword.get(opts, :level, "info")
+    level = opts[:level] || "info"
     content = %{"text" => text, "level" => level}  # String keys!
-    content = if details = Keyword.get(opts, :details), do: Map.put(content, "details", details), else: content
+    content = if details = opts[:details], do: Map.put(content, "details", details), else: content
 
     append_display_message(conversation_id, %{
       message_type: "system",
@@ -445,18 +446,22 @@ defmodule AgentsDemo.Conversations do
   """
   def append_error_message(conversation_id, error_text, opts \\ []) do
     content = %{"text" => error_text}  # String keys!
-    content = if code = Keyword.get(opts, :code), do: Map.put(content, "code", code), else: content
-    content = if details = Keyword.get(opts, :details), do: Map.put(content, "details", details), else: content
+    content = if code = opts[:code], do: Map.put(content, "code", code), else: content
+    content = if details = opts[:details], do: Map.put(content, "details", details), else: content
 
-    message_type = Keyword.get(opts, :message_type, "tool")
+    message_type = opts[:message_type] || "tool"
 
     append_display_message(conversation_id, %{
       message_type: message_type,
       content_type: "error",
       content: content,
-      metadata: Keyword.get(opts, :metadata, %{})
+      metadata: Map.get(opts, :metadata, %{})
     })
   end
+
+  #
+  # Tool Call/Result Message Functions
+  #
 
   @doc """
   Appends a tool call as a DisplayMessage to the conversation.
@@ -482,12 +487,11 @@ defmodule AgentsDemo.Conversations do
         arguments: %{"query" => "Oslo attractions"}
       }
 
-      {:ok, display_msg} = Conversations.append_tool_call_message(conversation_id, tool_call)
+      {:ok, display_msg} = append_tool_call_message(conversation_id, tool_call)
   """
   @spec append_tool_call_message(Ecto.UUID.t(), ToolCall.t()) ::
           {:ok, DisplayMessage.t()} | {:error, Ecto.Changeset.t()}
   def append_tool_call_message(conversation_id, %ToolCall{} = tool_call) do
-    # Convert ToolCall struct to DisplayMessage content format
     content = %{
       "call_id" => tool_call.call_id,
       "name" => tool_call.name,
@@ -533,14 +537,13 @@ defmodule AgentsDemo.Conversations do
         is_error: false
       }
 
-      {:ok, display_msg} = Conversations.append_tool_result_message(conversation_id, tool_result)
+      {:ok, display_msg} = append_tool_result_message(conversation_id, tool_result)
   """
   @spec append_tool_result_message(Ecto.UUID.t(), ToolResult.t()) ::
           {:ok, DisplayMessage.t()} | {:error, Ecto.Changeset.t()}
   def append_tool_result_message(conversation_id, %ToolResult{} = tool_result) do
-    # Convert ToolResult struct to DisplayMessage content format
-    # Extract content as string - it may be a list of ContentParts or a string
-    content_str = extract_tool_result_content(tool_result.content)
+    # Use built-in ContentPart helper - handles nil, string, and [ContentPart] cases
+    content_str = ContentPart.content_to_string(tool_result.content) || ""
 
     content = %{
       "tool_call_id" => tool_result.tool_call_id,
@@ -585,12 +588,11 @@ defmodule AgentsDemo.Conversations do
         %ToolCall{call_id: "call_2", name: "get_weather", arguments: %{...}}
       ]
 
-      {:ok, display_msgs} = Conversations.append_tool_calls_batch(conversation_id, tool_calls)
+      {:ok, display_msgs} = append_tool_calls_batch(conversation_id, tool_calls)
   """
   @spec append_tool_calls_batch(Ecto.UUID.t(), [ToolCall.t()]) ::
           {:ok, [DisplayMessage.t()]} | {:error, Ecto.Changeset.t()}
   def append_tool_calls_batch(conversation_id, tool_calls) when is_list(tool_calls) do
-    # Create DisplayMessages with sequence 0, 1, 2, ... for each tool call
     results =
       tool_calls
       |> Enum.with_index()
@@ -614,13 +616,11 @@ defmodule AgentsDemo.Conversations do
         |> Repo.insert()
       end)
 
-    # Check if any insertions failed
     errors = Enum.filter(results, &match?({:error, _}, &1))
 
     if Enum.empty?(errors) do
       {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
     else
-      # Return first error
       hd(errors)
     end
   end
@@ -648,18 +648,17 @@ defmodule AgentsDemo.Conversations do
         %ToolResult{tool_call_id: "call_2", name: "get_weather", content: "..."}
       ]
 
-      {:ok, display_msgs} = Conversations.append_tool_results_batch(conversation_id, tool_results)
+      {:ok, display_msgs} = append_tool_results_batch(conversation_id, tool_results)
   """
   @spec append_tool_results_batch(Ecto.UUID.t(), [ToolResult.t()]) ::
           {:ok, [DisplayMessage.t()]} | {:error, Ecto.Changeset.t()}
   def append_tool_results_batch(conversation_id, tool_results) when is_list(tool_results) do
-    # Create DisplayMessages with sequence 0, 1, 2, ... for each tool result
     results =
       tool_results
       |> Enum.with_index()
       |> Enum.map(fn {tool_result, index} ->
-        # Extract content as string - it may be a list of ContentParts or a string
-        content_str = extract_tool_result_content(tool_result.content)
+        # Use built-in ContentPart helper - handles nil, string, and [ContentPart] cases
+        content_str = ContentPart.content_to_string(tool_result.content) || ""
 
         content = %{
           "tool_call_id" => tool_result.tool_call_id,
@@ -681,13 +680,11 @@ defmodule AgentsDemo.Conversations do
         |> Repo.insert()
       end)
 
-    # Check if any insertions failed
     errors = Enum.filter(results, &match?({:error, _}, &1))
 
     if Enum.empty?(errors) do
       {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
     else
-      # Return first error
       hd(errors)
     end
   end
@@ -740,24 +737,40 @@ defmodule AgentsDemo.Conversations do
   # Private Helpers
   #
 
+  # TODO: Customize this based on YOUR scope struct fields
+  #
+  # Example implementations:
+  #
+  # Single-user scope:
+  # defp scope_query(query, %Scope{user_id: user_id}) do
+  #   from q in query, where: q.user_id == ^user_id
+  # end
+  #
+  # Multi-tenant (organization):
+  # defp scope_query(query, %Scope{organization_id: org_id}) do
+  #   from q in query, where: q.organization_id == ^org_id
+  # end
+  #
+  # Team-based:
+  # defp scope_query(query, %Scope{team_id: team_id}) do
+  #   from q in query, where: q.team_id == ^team_id
+  # end
+  #
   defp scope_query(query, %Scope{} = scope) do
+    # CUSTOMIZE THIS: Use your scope's actual fields
     owner_id = get_owner_id(scope)
     from q in query, where: q.user_id == ^owner_id
   end
 
+  # Extracts the owner ID from the scope struct.
+  #
+  # This default assumes your Scope has a `user` field containing
+  # a struct with an `id` field. Customize if your Scope has a different structure:
+  #
+  # Examples:
+  # defp get_owner_id(%Scope{user: user}), do: user.id  # struct with id
+  # defp get_owner_id(%Scope{user_id: id}), do: id                    # direct ID field
+  # defp get_owner_id(%Scope{current_user_id: id}), do: id            # current_ prefix
+  #
   defp get_owner_id(%Scope{user: user}), do: user.id
-
-  # Extract tool result content as a string
-  # ToolResult.content can be a string or a list of ContentParts
-  defp extract_tool_result_content(content) when is_binary(content), do: content
-
-  defp extract_tool_result_content(content) when is_list(content) do
-    # Extract text from ContentParts
-    content
-    |> Enum.filter(fn part -> part.type == :text end)
-    |> Enum.map(fn part -> part.content end)
-    |> Enum.join("\n")
-  end
-
-  defp extract_tool_result_content(_), do: ""
 end
