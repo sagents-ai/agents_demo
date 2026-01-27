@@ -42,9 +42,7 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
       if valid_timezone?(timezone) do
         timezone
       else
-        Logger.warning(
-          "InjectCurrentTime: Invalid timezone '#{timezone}', falling back to UTC"
-        )
+        Logger.warning("InjectCurrentTime: Invalid timezone '#{timezone}', falling back to UTC")
 
         "UTC"
       end
@@ -137,9 +135,10 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
       updated
     else
       # No text part found, prepend a new text part
-      timestamp_part = LangChain.Message.ContentPart.text!(
-        "<current_timestamp>#{timestamp}</current_timestamp>\n\n"
-      )
+      timestamp_part =
+        LangChain.Message.ContentPart.text!(
+          "<current_timestamp>#{timestamp}</current_timestamp>\n\n"
+        )
 
       [timestamp_part | parts]
     end

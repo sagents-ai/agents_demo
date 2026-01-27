@@ -81,7 +81,6 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     end
   end
 
-
   describe "before_model/2 with string content" do
     setup do
       {:ok, config} = InjectCurrentTime.init(timezone: "UTC")
@@ -89,13 +88,14 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     end
 
     test "prepends timestamp to the last user message", %{config: config} do
-      state = State.new!(%{
-        messages: [
-          Message.new_user!("First message"),
-          Message.new_assistant!("Response"),
-          Message.new_user!("Second message")
-        ]
-      })
+      state =
+        State.new!(%{
+          messages: [
+            Message.new_user!("First message"),
+            Message.new_assistant!("Response"),
+            Message.new_user!("Second message")
+          ]
+        })
 
       {:ok, updated_state} = InjectCurrentTime.before_model(state, config)
 
@@ -115,12 +115,13 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     end
 
     test "does not modify messages when there are no user messages", %{config: config} do
-      state = State.new!(%{
-        messages: [
-          Message.new_system!("System prompt"),
-          Message.new_assistant!("Response")
-        ]
-      })
+      state =
+        State.new!(%{
+          messages: [
+            Message.new_system!("System prompt"),
+            Message.new_assistant!("Response")
+          ]
+        })
 
       {:ok, updated_state} = InjectCurrentTime.before_model(state, config)
 
@@ -129,11 +130,12 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     end
 
     test "handles state with only one user message", %{config: config} do
-      state = State.new!(%{
-        messages: [
-          Message.new_user!("Only message")
-        ]
-      })
+      state =
+        State.new!(%{
+          messages: [
+            Message.new_user!("Only message")
+          ]
+        })
 
       {:ok, updated_state} = InjectCurrentTime.before_model(state, config)
 
@@ -183,9 +185,10 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     test "timestamp format is correct for UTC" do
       {:ok, config} = InjectCurrentTime.init(timezone: "UTC")
 
-      state = State.new!(%{
-        messages: [Message.new_user!("Test")]
-      })
+      state =
+        State.new!(%{
+          messages: [Message.new_user!("Test")]
+        })
 
       {:ok, updated_state} = InjectCurrentTime.before_model(state, config)
 
@@ -197,7 +200,10 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
         [_, timestamp] ->
           # Should contain day of week, date, time, AM/PM, and timezone
           assert String.contains?(timestamp, "UTC")
-          assert Regex.match?(~r/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),/, timestamp), "Should start with day abbreviation"
+
+          assert Regex.match?(~r/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),/, timestamp),
+                 "Should start with day abbreviation"
+
           assert Regex.match?(~r/\d{4}-\d{2}-\d{2}/, timestamp), "Should contain date"
           assert Regex.match?(~r/\d{1,2}:\d{2}:\d{2}/, timestamp), "Should contain time"
           assert Regex.match?(~r/(AM|PM)/, timestamp), "Should contain AM/PM"
@@ -210,9 +216,10 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     test "timestamp reflects configured timezone" do
       {:ok, config} = InjectCurrentTime.init(timezone: "America/New_York")
 
-      state = State.new!(%{
-        messages: [Message.new_user!("Test")]
-      })
+      state =
+        State.new!(%{
+          messages: [Message.new_user!("Test")]
+        })
 
       {:ok, updated_state} = InjectCurrentTime.before_model(state, config)
 
@@ -232,5 +239,4 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
       end
     end
   end
-
 end

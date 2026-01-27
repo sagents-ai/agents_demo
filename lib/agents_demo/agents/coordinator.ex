@@ -162,20 +162,23 @@ defmodule AgentsDemo.Agents.Coordinator do
   """
   def start_conversation_session(conversation_id, opts \\ []) do
     # Validate required scope
-    scope = case Keyword.fetch(opts, :scope) do
-      {:ok, scope_value} -> scope_value
-      :error ->
-        raise ArgumentError, """
-        Missing required :scope option.
+    scope =
+      case Keyword.fetch(opts, :scope) do
+        {:ok, scope_value} ->
+          scope_value
 
-        Please pass the scope to use for the filesystem when starting a session:
+        :error ->
+          raise ArgumentError, """
+          Missing required :scope option.
 
-            AgentsDemo.Agents.Coordinator.start_conversation_session(
-              conversation_id,
-              scope: {:user, user_id}
-            )
-        """
-    end
+          Please pass the scope to use for the filesystem when starting a session:
+
+              AgentsDemo.Agents.Coordinator.start_conversation_session(
+                conversation_id,
+                scope: {:user, user_id}
+              )
+          """
+      end
 
     agent_id = conversation_agent_id(conversation_id)
 
@@ -205,7 +208,9 @@ defmodule AgentsDemo.Agents.Coordinator do
     agent_id = conversation_agent_id(conversation_id)
 
     case AgentServer.get_pid(agent_id) do
-      nil -> {:ok, :not_running}
+      nil ->
+        {:ok, :not_running}
+
       _pid ->
         AgentServer.stop(agent_id)
         {:ok, :stopped}
@@ -437,7 +442,9 @@ defmodule AgentsDemo.Agents.Coordinator do
       {:ok, [text_msg, tool_call_msg]} = AgentsDemo.Agents.Coordinator.save_message(conversation_id, message)
   """
   def save_message(conversation_id, %Message{} = message) do
-    Logger.debug("#{__MODULE__}.save_message called for conversation #{conversation_id}, message role: #{message.role}")
+    Logger.debug(
+      "#{__MODULE__}.save_message called for conversation #{conversation_id}, message role: #{message.role}"
+    )
 
     # Use library helper to extract displayable items
     display_items = DisplayHelpers.extract_display_items(message)
@@ -455,7 +462,9 @@ defmodule AgentsDemo.Agents.Coordinator do
             "content" => item.content
           }
 
-          Logger.debug("Attempting to save display message: type=#{attrs["content_type"]}, message_type=#{attrs["message_type"]}")
+          Logger.debug(
+            "Attempting to save display message: type=#{attrs["content_type"]}, message_type=#{attrs["message_type"]}"
+          )
 
           case AgentsDemo.Conversations.append_display_message(conversation_id, attrs) do
             {:ok, display_msg} ->
@@ -463,7 +472,10 @@ defmodule AgentsDemo.Agents.Coordinator do
               {:cont, {:ok, acc ++ [display_msg]}}
 
             {:error, reason} ->
-              Logger.error("Failed to persist DisplayMessage (#{attrs["content_type"]}): #{inspect(reason)}")
+              Logger.error(
+                "Failed to persist DisplayMessage (#{attrs["content_type"]}): #{inspect(reason)}"
+              )
+
               {:halt, {:error, reason}}
           end
         end)
@@ -492,7 +504,9 @@ defmodule AgentsDemo.Agents.Coordinator do
   end
 
   defp do_start_session(conversation_id, agent_id, scope, opts) do
-    Logger.info("Starting agent session for conversation #{conversation_id} with scope #{inspect(scope)}")
+    Logger.info(
+      "Starting agent session for conversation #{conversation_id} with scope #{inspect(scope)}"
+    )
 
     # 1. Extract options
     timezone = Keyword.get(opts, :timezone, "UTC")
@@ -512,7 +526,8 @@ defmodule AgentsDemo.Agents.Coordinator do
     {:ok, state} = create_conversation_state(conversation_id)
 
     # 4. Extract configuration from options
-    inactivity_timeout = Keyword.get(opts, :inactivity_timeout, :timer.minutes(@inactivity_timeout_minutes))
+    inactivity_timeout =
+      Keyword.get(opts, :inactivity_timeout, :timer.minutes(@inactivity_timeout_minutes))
 
     # 5. Start the AgentSupervisor with proper configuration
     supervisor_name = AgentSupervisor.get_name(agent_id)
@@ -570,7 +585,9 @@ defmodule AgentsDemo.Agents.Coordinator do
 
     case AgentsDemo.Conversations.load_agent_state(conversation_id) do
       {:ok, exported_state} ->
-        Logger.info("Found saved state for conversation #{conversation_id}, attempting to restore...")
+        Logger.info(
+          "Found saved state for conversation #{conversation_id}, attempting to restore..."
+        )
 
         nested_state = exported_state["state"]
 
@@ -599,7 +616,10 @@ defmodule AgentsDemo.Agents.Coordinator do
         end
 
       {:error, :not_found} ->
-        Logger.info("No saved state found for conversation #{conversation_id}, creating fresh state")
+        Logger.info(
+          "No saved state found for conversation #{conversation_id}, creating fresh state"
+        )
+
         {:ok, State.new!(%{})}
     end
   end

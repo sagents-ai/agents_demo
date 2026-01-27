@@ -19,7 +19,11 @@ defmodule AgentsDemo.Repo.Migrations.CreateSagentsPersistence do
     # Agent states table (one per conversation)
     create table(:sagents_agent_states, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :conversation_id, references(:sagents_conversations, on_delete: :delete_all, type: :binary_id), null: false
+
+      add :conversation_id,
+          references(:sagents_conversations, on_delete: :delete_all, type: :binary_id),
+          null: false
+
       add :state_data, :map, null: false
       add :version, :integer, null: false
 
@@ -31,17 +35,26 @@ defmodule AgentsDemo.Repo.Migrations.CreateSagentsPersistence do
     # Display messages table (multi-content type support)
     create table(:sagents_display_messages, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :conversation_id, references(:sagents_conversations, on_delete: :delete_all, type: :binary_id), null: false
-      add :message_type, :string, null: false  # "user", "assistant", "tool", "system"
-      add :content, :map, null: false  # JSONB storage for flexible content
-      add :content_type, :string, null: false, default: "text"  # Content type for rendering
-      add :sequence, :integer, default: 0, null: false  # Message-local ordering (0-based within same timestamp)
+
+      add :conversation_id,
+          references(:sagents_conversations, on_delete: :delete_all, type: :binary_id),
+          null: false
+
+      # "user", "assistant", "tool", "system"
+      add :message_type, :string, null: false
+      # JSONB storage for flexible content
+      add :content, :map, null: false
+      # Content type for rendering
+      add :content_type, :string, null: false, default: "text"
+      # Message-local ordering (0-based within same timestamp)
+      add :sequence, :integer, default: 0, null: false
       add :metadata, :map, default: %{}
 
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
 
     create index(:sagents_display_messages, [:conversation_id, :inserted_at, :sequence])
-    create index(:sagents_display_messages, [:content_type])  # For filtering by content type
+    # For filtering by content type
+    create index(:sagents_display_messages, [:content_type])
   end
 end

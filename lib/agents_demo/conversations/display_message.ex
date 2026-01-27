@@ -92,10 +92,14 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
   schema "sagents_display_messages" do
     belongs_to :conversation, Conversation
 
-    field :message_type, :string            # "user", "assistant", "tool", "system"
-    field :content, :map                    # Flexible JSONB storage
-    field :content_type, :string            # Type of content for rendering
-    field :sequence, :integer, default: 0   # Message-local ordering (0-based, resets per message)
+    # "user", "assistant", "tool", "system"
+    field :message_type, :string
+    # Flexible JSONB storage
+    field :content, :map
+    # Type of content for rendering
+    field :content_type, :string
+    # Message-local ordering (0-based, resets per message)
+    field :sequence, :integer, default: 0
     field :metadata, :map, default: %{}
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
@@ -140,14 +144,12 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
       {"structured_data", %{"format" => _, "data" => _}} -> changeset
       {"notification", %{"text" => _}} -> changeset
       {"error", %{"text" => _}} -> changeset
-
       # Tool call validation
       {"tool_call", %{"call_id" => _, "name" => _, "arguments" => _}} -> changeset
-
       # Tool result validation
       {"tool_result", %{"tool_call_id" => _, "name" => _, "content" => _}} -> changeset
-
-      {nil, _} -> changeset  # Allow nil during build
+      # Allow nil during build
+      {nil, _} -> changeset
       _ -> add_error(changeset, :content, "invalid structure for content_type #{content_type}")
     end
   end
@@ -158,18 +160,33 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
   """
   def to_text(%DisplayMessage{content_type: "text", content: %{"text" => text}}), do: text
   def to_text(%DisplayMessage{content_type: "thinking", content: %{"text" => text}}), do: text
+
   def to_text(%DisplayMessage{content_type: "image", content: content}) do
     Map.get(content, "caption") || Map.get(content, "alt_text") || ""
   end
-  def to_text(%DisplayMessage{content_type: "file_reference", content: %{"name" => name}}), do: "File: #{name}"
-  def to_text(%DisplayMessage{content_type: "structured_data", content: content}), do: "Data: #{Map.get(content, "format", "")}"
+
+  def to_text(%DisplayMessage{content_type: "file_reference", content: %{"name" => name}}),
+    do: "File: #{name}"
+
+  def to_text(%DisplayMessage{content_type: "structured_data", content: content}),
+    do: "Data: #{Map.get(content, "format", "")}"
+
   def to_text(%DisplayMessage{content_type: "notification", content: %{"text" => text}}), do: text
   def to_text(%DisplayMessage{content_type: "error", content: %{"text" => text}}), do: text
-  def to_text(%DisplayMessage{content_type: "tool_call", content: %{"name" => name, "arguments" => args}}) do
+
+  def to_text(%DisplayMessage{
+        content_type: "tool_call",
+        content: %{"name" => name, "arguments" => args}
+      }) do
     "Tool call: #{name}(#{inspect(args)})"
   end
-  def to_text(%DisplayMessage{content_type: "tool_result", content: %{"name" => name, "content" => content}}) do
+
+  def to_text(%DisplayMessage{
+        content_type: "tool_result",
+        content: %{"name" => name, "content" => content}
+      }) do
     "Tool result from #{name}: #{content}"
   end
+
   def to_text(_), do: ""
 end

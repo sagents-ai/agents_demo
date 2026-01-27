@@ -104,9 +104,9 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           match?(%Message{role: :user}, last_message) and
               Enum.any?(messages, fn msg ->
                 match?(%Message{role: :user}, msg) and
-                  Enum.any?(msg.content, fn part ->
-                    String.contains?(part.content, "Create a project plan")
-                  end)
+                    Enum.any?(msg.content, fn part ->
+                      String.contains?(part.content, "Create a project plan")
+                    end)
               end) ->
             tool_call =
               ToolCall.new!(%{
@@ -161,7 +161,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           # This is called by ConversationTitle middleware
           Enum.any?(messages, fn msg ->
             match?(%Message{role: :system}, msg) and
-              String.contains?(List.first(msg.content || []) |> Map.get(:content, ""), "title")
+                String.contains?(List.first(msg.content || []) |> Map.get(:content, ""), "title")
           end) ->
             {:ok, [Message.new_assistant!("Project Planning Discussion")]}
 
@@ -169,9 +169,9 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           Enum.any?(messages, fn msg ->
             match?(%Message{role: :tool}, msg) and
               msg.tool_results != nil and
-              Enum.any?(msg.tool_results, fn result ->
-                result.name == "write_todos"
-              end)
+                Enum.any?(msg.tool_results, fn result ->
+                  result.name == "write_todos"
+                end)
           end) ->
             {:ok, [Message.new_assistant!("I did it!")]}
 
@@ -261,8 +261,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
                 }
               })
 
-            {:ok,
-             [Message.new_assistant!(%{content: "Creating tasks", tool_calls: [tool_call]})]}
+            {:ok, [Message.new_assistant!(%{content: "Creating tasks", tool_calls: [tool_call]})]}
 
           # Title generation
           Enum.any?(messages, fn msg ->
@@ -351,9 +350,9 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           match?(%Message{role: :user}, last_message) and
               Enum.any?(messages, fn msg ->
                 match?(%Message{role: :user}, msg) and
-                  Enum.any?(msg.content, fn part ->
-                    String.contains?(part.content, "Create initial tasks")
-                  end)
+                    Enum.any?(msg.content, fn part ->
+                      String.contains?(part.content, "Create initial tasks")
+                    end)
               end) ->
             tool_call =
               ToolCall.new!(%{
@@ -393,9 +392,9 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           match?(%Message{role: :user}, last_message) and
               Enum.any?(messages, fn msg ->
                 match?(%Message{role: :user}, msg) and
-                  Enum.any?(msg.content, fn part ->
-                    String.contains?(part.content, "Mark first task complete")
-                  end)
+                    Enum.any?(msg.content, fn part ->
+                      String.contains?(part.content, "Mark first task complete")
+                    end)
               end) ->
             tool_call =
               ToolCall.new!(%{

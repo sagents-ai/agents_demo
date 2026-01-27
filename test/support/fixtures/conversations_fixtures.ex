@@ -91,7 +91,9 @@ defmodule AgentsDemo.ConversationsFixtures do
 
     content = %{"url" => url}
     content = if alt = attrs[:alt_text], do: Map.put(content, "alt_text", alt), else: content
-    content = if caption = attrs[:caption], do: Map.put(content, "caption", caption), else: content
+
+    content =
+      if caption = attrs[:caption], do: Map.put(content, "caption", caption), else: content
 
     {:ok, message} =
       Conversations.append_display_message(conversation_id, %{
@@ -136,7 +138,9 @@ defmodule AgentsDemo.ConversationsFixtures do
 
     content = %{"text" => text}
     content = if code = attrs[:code], do: Map.put(content, "code", code), else: content
-    content = if details = attrs[:details], do: Map.put(content, "details", details), else: content
+
+    content =
+      if details = attrs[:details], do: Map.put(content, "details", details), else: content
 
     {:ok, message} =
       Conversations.append_display_message(conversation_id, %{

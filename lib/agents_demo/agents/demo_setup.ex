@@ -68,7 +68,10 @@ defmodule AgentsDemo.Agents.DemoSetup do
 
       {:error, :supervisor_not_ready} = error ->
         # This is expected in async tests where FileSystemSupervisor isn't available
-        Logger.debug("FileSystemSupervisor not available for user #{user_id} - filesystem will not be available")
+        Logger.debug(
+          "FileSystemSupervisor not available for user #{user_id} - filesystem will not be available"
+        )
+
         error
 
       {:error, reason} = error ->

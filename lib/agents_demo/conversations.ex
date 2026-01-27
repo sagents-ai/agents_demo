@@ -240,7 +240,7 @@ defmodule AgentsDemo.Conversations do
 
     DisplayMessage
     |> where([m], m.conversation_id == ^conversation_id)
-    |> order_by([m], [asc: m.inserted_at, asc: m.sequence])
+    |> order_by([m], asc: m.inserted_at, asc: m.sequence)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
@@ -270,7 +270,7 @@ defmodule AgentsDemo.Conversations do
     append_display_message(conversation_id, %{
       message_type: message_type,
       content_type: "text",
-      content: %{"text" => text}  # String keys!
+      content: %{"text" => text}
     })
   end
 
@@ -288,7 +288,7 @@ defmodule AgentsDemo.Conversations do
     append_display_message(conversation_id, %{
       message_type: "assistant",
       content_type: "thinking",
-      content: %{"text" => thinking_text}  # String keys!
+      content: %{"text" => thinking_text}
     })
   end
 
@@ -311,7 +311,7 @@ defmodule AgentsDemo.Conversations do
         message_type: "tool", caption: "Generated chart")
   """
   def append_image_message(conversation_id, image_url, opts \\ []) do
-    content = %{"url" => image_url}  # String keys!
+    content = %{"url" => image_url}
     content = if alt = opts[:alt_text], do: Map.put(content, "alt_text", alt), else: content
     content = if caption = opts[:caption], do: Map.put(content, "caption", caption), else: content
 
@@ -344,7 +344,7 @@ defmodule AgentsDemo.Conversations do
         size: 245760, mime_type: "application/pdf")
   """
   def append_file_message(conversation_id, file_path, file_name, opts \\ []) do
-    content = %{"path" => file_path, "name" => file_name}  # String keys!
+    content = %{"path" => file_path, "name" => file_name}
     content = if size = opts[:size], do: Map.put(content, "size", size), else: content
     content = if mime = opts[:mime_type], do: Map.put(content, "mime_type", mime), else: content
 
@@ -383,7 +383,7 @@ defmodule AgentsDemo.Conversations do
         %{"status" => "success", "count" => 42})
   """
   def append_structured_data_message(conversation_id, format, data, opts \\ []) do
-    content = %{"format" => format, "data" => data}  # String keys!
+    content = %{"format" => format, "data" => data}
     content = if columns = opts[:columns], do: Map.put(content, "columns", columns), else: content
 
     message_type = opts[:message_type] || "tool"
@@ -414,7 +414,7 @@ defmodule AgentsDemo.Conversations do
   """
   def append_notification_message(conversation_id, text, opts \\ []) do
     level = opts[:level] || "info"
-    content = %{"text" => text, "level" => level}  # String keys!
+    content = %{"text" => text, "level" => level}
     content = if details = opts[:details], do: Map.put(content, "details", details), else: content
 
     append_display_message(conversation_id, %{
@@ -445,7 +445,7 @@ defmodule AgentsDemo.Conversations do
         metadata: %{"tool_name" => "database_query"})
   """
   def append_error_message(conversation_id, error_text, opts \\ []) do
-    content = %{"text" => error_text}  # String keys!
+    content = %{"text" => error_text}
     content = if code = opts[:code], do: Map.put(content, "code", code), else: content
     content = if details = opts[:details], do: Map.put(content, "details", details), else: content
 
@@ -726,7 +726,8 @@ defmodule AgentsDemo.Conversations do
     owner_id = get_owner_id(scope)
 
     from(m in DisplayMessage,
-      join: c in Conversation, on: m.conversation_id == c.id,
+      join: c in Conversation,
+      on: m.conversation_id == c.id,
       where: c.user_id == ^owner_id,
       where: fragment("?::text ILIKE ?", m.content, ^"%#{search_term}%")
     )

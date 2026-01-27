@@ -44,9 +44,10 @@ defmodule AgentsDemoWeb.Router do
       live_dashboard "/dashboard", metrics: AgentsDemoWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
 
-      sagents_live_debugger "/debug/agents",
+      sagents_live_debugger("/debug/agents",
         coordinator: AgentsDemo.Agents.Coordinator,
         presence_module: AgentsDemoWeb.Presence
+      )
     end
   end
 

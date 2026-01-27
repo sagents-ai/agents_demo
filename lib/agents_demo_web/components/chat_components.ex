@@ -175,7 +175,10 @@ defmodule AgentsDemoWeb.ChatComponents do
         <%!-- Empty state shown when no conversations --%>
         <%= if not @has_conversations do %>
           <div class="flex flex-col items-center justify-center h-full px-4 py-12 text-center">
-            <.icon name="hero-chat-bubble-left-right" class="w-12 h-12 text-[var(--color-text-tertiary)] mb-3" />
+            <.icon
+              name="hero-chat-bubble-left-right"
+              class="w-12 h-12 text-[var(--color-text-tertiary)] mb-3"
+            />
             <p class="text-[var(--color-text-secondary)] text-sm m-0">No conversations yet</p>
             <p class="text-[var(--color-text-tertiary)] text-xs m-0 mt-1">
               Start a new conversation to get started
@@ -194,7 +197,8 @@ defmodule AgentsDemoWeb.ChatComponents do
             id={dom_id}
             class={[
               "px-4 py-3 border-b border-[var(--color-border)] cursor-pointer hover:bg-[var(--color-border-light)] transition-colors flex items-start justify-between group",
-              conversation.id == @conversation_id && "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-500"
+              conversation.id == @conversation_id &&
+                "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-l-blue-500"
             ]}
             phx-click="load_conversation"
             phx-value-id={conversation.id}
@@ -210,7 +214,8 @@ defmodule AgentsDemoWeb.ChatComponents do
             <button
               type="button"
               class="ml-2 p-1 text-gray-400 hover:text-red-600 focus:outline-none opacity-0 group-hover:opacity-100 transition-opacity"
-              phx-click="delete_conversation" phx-value-id={conversation.id}
+              phx-click="delete_conversation"
+              phx-value-id={conversation.id}
               data-confirm={"Are you sure you want to delete '#{conversation.title}'? This action cannot be undone."}
               title="Delete conversation"
             >
@@ -516,14 +521,12 @@ defmodule AgentsDemoWeb.ChatComponents do
           message_id={@message.id}
           content_text={get_in(@message.content, ["text"]) || ""}
         />
-
       <% "tool_call" -> %>
         <.tool_call_display
           call_id={get_in(@message.content, ["call_id"])}
           name={get_in(@message.content, ["name"])}
           arguments={get_in(@message.content, ["arguments"])}
         />
-
       <% "tool_result" -> %>
         <.tool_result_display
           tool_call_id={get_in(@message.content, ["tool_call_id"])}
@@ -531,7 +534,6 @@ defmodule AgentsDemoWeb.ChatComponents do
           content={get_in(@message.content, ["content"])}
           is_error={get_in(@message.content, ["is_error"]) || false}
         />
-
       <% _other -> %>
         <.text_message
           message={@message}
@@ -548,8 +550,10 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class={[
         "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
         @message.message_type == "user" && "bg-[var(--color-user-message)] text-white",
-        @message.message_type == "assistant" && "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
-        @message.message_type == "tool" && "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
+        @message.message_type == "assistant" &&
+          "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
+        @message.message_type == "tool" &&
+          "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
       ]}>
         <%= if @message.message_type == "user" do %>
           <.icon name="hero-user" class="w-5 h-5" />
@@ -685,7 +689,10 @@ defmodule AgentsDemoWeb.ChatComponents do
             <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
               Response
             </summary>
-            <div class="mt-2 p-2 bg-[var(--color-background)] rounded whitespace-pre-wrap font-mono text-xs" phx-no-format>{format_tool_result_content(@content)}</div>
+            <div
+              class="mt-2 p-2 bg-[var(--color-background)] rounded whitespace-pre-wrap font-mono text-xs"
+              phx-no-format
+            >{format_tool_result_content(@content)}</div>
           </details>
         </div>
       </div>
@@ -726,10 +733,12 @@ defmodule AgentsDemoWeb.ChatComponents do
     # Convert merged_content to string for display
     assigns =
       assigns
-      |> assign(:thinking,
+      |> assign(
+        :thinking,
         MessageDelta.content_to_string(assigns.streaming_delta, :thinking)
       )
-      |> assign(:content,
+      |> assign(
+        :content,
         MessageDelta.content_to_string(assigns.streaming_delta, :text) || ""
       )
 
@@ -741,7 +750,12 @@ defmodule AgentsDemoWeb.ChatComponents do
 
       <div class="flex-1 min-w-0">
         <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-          <.thinking_display :if={@thinking} class="mb-2" message_id="streaming_delta" content_text={@thinking} />
+          <.thinking_display
+            :if={@thinking}
+            class="mb-2"
+            message_id="streaming_delta"
+            content_text={@thinking}
+          />
           <.markdown text={@content} />
           <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
         </div>

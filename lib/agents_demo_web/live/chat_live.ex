@@ -159,8 +159,9 @@ defmodule AgentsDemoWeb.ChatLive do
                socket
                |> assign(:input, "")
                |> assign(:loading, true)}
-              # Note: No stream_insert here!
-              # Display happens when we receive {:display_message_saved, msg} event
+
+            # Note: No stream_insert here!
+            # Display happens when we receive {:display_message_saved, msg} event
 
             {:error, reason} ->
               Logger.error("Failed to execute agent: #{inspect(reason)}")
@@ -617,6 +618,7 @@ defmodule AgentsDemoWeb.ChatLive do
      socket
      |> assign(:streaming_delta, nil)
      |> assign(:loading, false)}
+
     # Note: No persistence, no UI update here!
     # Messages already saved and displayed via {:display_message_saved, msg} events
   end
@@ -735,7 +737,7 @@ defmodule AgentsDemoWeb.ChatLive do
 
     # Unsubscribe from previous conversation if switching conversations
     if connected?(socket) && socket.assigns[:conversation_id] &&
-       socket.assigns.conversation_id != conversation_id do
+         socket.assigns.conversation_id != conversation_id do
       :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
       Logger.debug("Unsubscribed from previous conversation #{socket.assigns.conversation_id}")
     end
@@ -751,11 +753,16 @@ defmodule AgentsDemoWeb.ChatLive do
 
       # Track presence - this enables smart agent shutdown
       user_id = socket.assigns.current_scope.user.id
+
       case Coordinator.track_conversation_viewer(conversation_id, user_id, self()) do
         {:ok, _ref} ->
           Logger.debug("Tracking presence for conversation #{conversation_id}, user #{user_id}")
+
         {:error, {:already_tracked, _, _, _}} ->
-          Logger.debug("Already tracking presence for conversation #{conversation_id}, user #{user_id}")
+          Logger.debug(
+            "Already tracking presence for conversation #{conversation_id}, user #{user_id}"
+          )
+
         {:error, reason} ->
           Logger.warning("Failed to track presence: #{inspect(reason)}")
       end
@@ -921,6 +928,7 @@ defmodule AgentsDemoWeb.ChatLive do
             Logger.info(
               "Persisted agent state for conversation #{socket.assigns.conversation_id} (#{context_label})"
             )
+
             :ok
 
           {:error, reason} ->
@@ -929,11 +937,17 @@ defmodule AgentsDemoWeb.ChatLive do
         end
       rescue
         error ->
-          Logger.error("Exception while persisting agent state (#{context_label}): #{inspect(error)}")
+          Logger.error(
+            "Exception while persisting agent state (#{context_label}): #{inspect(error)}"
+          )
+
           {:error, error}
       end
     else
-      Logger.debug("Skipping state persistence - no conversation_id or agent_id (#{context_label})")
+      Logger.debug(
+        "Skipping state persistence - no conversation_id or agent_id (#{context_label})"
+      )
+
       :ok
     end
   end

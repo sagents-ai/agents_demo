@@ -73,7 +73,9 @@ defmodule AgentsDemoWeb.ChatLiveAgentStartupTest do
       |> render_click()
 
       # Verify conversation_id was cleared
-      assert extract_conversation_id(view) == nil, "Conversation should be cleared after new thread"
+      assert extract_conversation_id(view) == nil,
+             "Conversation should be cleared after new thread"
+
       Logger.info("Clicked 'New Thread', conversation cleared")
 
       # Wait a moment to simulate user delay

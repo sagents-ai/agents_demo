@@ -343,7 +343,13 @@ defmodule AgentsDemo.ConversationsTest do
 
       # Simulate multi-part assistant response (thinking + text)
       msg2 = thinking_message_fixture(conversation.id, %{text: "Let me think...", sequence: 0})
-      msg3 = text_message_fixture(conversation.id, %{text: "Assistant: Response", message_type: "assistant", sequence: 1})
+
+      msg3 =
+        text_message_fixture(conversation.id, %{
+          text: "Assistant: Response",
+          message_type: "assistant",
+          sequence: 1
+        })
 
       messages = Conversations.load_display_messages(conversation.id)
 
@@ -490,14 +496,14 @@ defmodule AgentsDemo.ConversationsTest do
                  conversation.id,
                  "/tmp/doc.pdf",
                  "doc.pdf",
-                 size: 123456,
+                 size: 123_456,
                  mime_type: "application/pdf"
                )
 
       assert message.content == %{
                "path" => "/tmp/doc.pdf",
                "name" => "doc.pdf",
-               "size" => 123456,
+               "size" => 123_456,
                "mime_type" => "application/pdf"
              }
     end
@@ -679,7 +685,14 @@ defmodule AgentsDemo.ConversationsTest do
       # In real usage, these would all be created within microseconds
 
       thinking = thinking_message_fixture(conversation.id, %{text: "Analyzing...", sequence: 0})
-      text = text_message_fixture(conversation.id, %{text: "Here's the result", message_type: "assistant", sequence: 1})
+
+      text =
+        text_message_fixture(conversation.id, %{
+          text: "Here's the result",
+          message_type: "assistant",
+          sequence: 1
+        })
+
       image = image_message_fixture(conversation.id, %{url: "/chart.png", sequence: 2})
 
       messages = Conversations.load_display_messages(conversation.id)
@@ -698,12 +711,20 @@ defmodule AgentsDemo.ConversationsTest do
       msg1 = text_message_fixture(conversation.id, %{text: "User question", sequence: 0})
 
       # Second message group (assistant multi-part)
-      :timer.sleep(10) # Ensure different timestamp
+      # Ensure different timestamp
+      :timer.sleep(10)
       msg2 = thinking_message_fixture(conversation.id, %{text: "Thinking", sequence: 0})
-      msg3 = text_message_fixture(conversation.id, %{text: "Response", message_type: "assistant", sequence: 1})
+
+      msg3 =
+        text_message_fixture(conversation.id, %{
+          text: "Response",
+          message_type: "assistant",
+          sequence: 1
+        })
 
       # Third message group (user)
-      :timer.sleep(10) # Ensure different timestamp
+      # Ensure different timestamp
+      :timer.sleep(10)
       msg4 = text_message_fixture(conversation.id, %{text: "Follow-up", sequence: 0})
 
       messages = Conversations.load_display_messages(conversation.id)

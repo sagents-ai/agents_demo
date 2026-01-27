@@ -250,7 +250,10 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
     end
   rescue
     e ->
-      Logger.error("WebToolMiddleware: Exception during web_lookup: #{Exception.format(:error, e, __STACKTRACE__)}")
+      Logger.error(
+        "WebToolMiddleware: Exception during web_lookup: #{Exception.format(:error, e, __STACKTRACE__)}"
+      )
+
       {:error, "Web lookup failed: #{Exception.message(e)}"}
   end
 

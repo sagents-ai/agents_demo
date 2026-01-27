@@ -375,10 +375,11 @@ defmodule AgentsDemo.Agents.Factory do
       # ConversationTitle - auto-generate titles after the first exchange.
       # Positioned early because it's async and should start as soon as possible.
       # Uses a lighter/faster model (Haiku) for cost efficiency.
-      {ConversationTitle, [
-        chat_model: get_title_model(),
-        fallbacks: get_title_fallbacks()
-      ]},
+      {ConversationTitle,
+       [
+         chat_model: get_title_model(),
+         fallbacks: get_title_fallbacks()
+       ]},
 
       # Virtual filesystem - file operations with configurable scope
       # For user-facing agents, pass {:user, user_id} from the Coordinator
@@ -388,14 +389,15 @@ defmodule AgentsDemo.Agents.Factory do
       # SubAgent - spawn child agents for complex tasks
       # Configure block_middleware to prevent certain middleware from being
       # inherited by subagents (e.g., Summarization, ConversationTitle).
-      {Sagents.Middleware.SubAgent, [
-        block_middleware: [
-          AgentsDemo.Middleware.WebToolMiddleware,
-          AgentsDemo.Middleware.InjectCurrentTime,
-          Sagents.Middleware.Summarization,
-          Sagents.Middleware.ConversationTitle
-        ]
-      ]},
+      {Sagents.Middleware.SubAgent,
+       [
+         block_middleware: [
+           AgentsDemo.Middleware.WebToolMiddleware,
+           AgentsDemo.Middleware.InjectCurrentTime,
+           Sagents.Middleware.Summarization,
+           Sagents.Middleware.ConversationTitle
+         ]
+       ]},
 
       # Custom middleware that injects the current time into every user message
       {InjectCurrentTime, [timezone: timezone]},
