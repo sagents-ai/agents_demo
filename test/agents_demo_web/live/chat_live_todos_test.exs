@@ -47,7 +47,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
     %{user: user, conn: log_in_user(build_conn(), user)}
   end
 
-  defp wait_for_agent_status(view, expected_status, timeout \\ 5000) do
+  defp wait_for_agent_status(view, expected_status, timeout) do
     deadline = System.monotonic_time(:millisecond) + timeout
 
     Stream.repeatedly(fn ->
@@ -103,7 +103,10 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           # First call: Agent makes write_todos tool call
           match?(%Message{role: :user}, last_message) and
               Enum.any?(messages, fn msg ->
-                match?(%Message{content: [%{content: "Create a project plan"}]}, msg)
+                match?(%Message{role: :user}, msg) and
+                  Enum.any?(msg.content, fn part ->
+                    String.contains?(part.content, "Create a project plan")
+                  end)
               end) ->
             tool_call =
               ToolCall.new!(%{
@@ -294,7 +297,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
 
       # Verify TODOs are still present after reload
       reloaded_assigns = :sys.get_state(new_view.pid).socket.assigns
-      reloaded_todos = reloaded_assigns[:todos]
+      _reloaded_todos = reloaded_assigns[:todos]
 
       # Note: TODOs come from agent state, not from database
       # If agent is not running, TODOs will be empty until agent starts
@@ -347,7 +350,10 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           # First tool call
           match?(%Message{role: :user}, last_message) and
               Enum.any?(messages, fn msg ->
-                match?(%Message{content: [%{content: "Create initial tasks"}]}, msg)
+                match?(%Message{role: :user}, msg) and
+                  Enum.any?(msg.content, fn part ->
+                    String.contains?(part.content, "Create initial tasks")
+                  end)
               end) ->
             tool_call =
               ToolCall.new!(%{
@@ -386,7 +392,10 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           # Update tool call
           match?(%Message{role: :user}, last_message) and
               Enum.any?(messages, fn msg ->
-                match?(%Message{content: [%{content: "Mark first task complete"}]}, msg)
+                match?(%Message{role: :user}, msg) and
+                  Enum.any?(msg.content, fn part ->
+                    String.contains?(part.content, "Mark first task complete")
+                  end)
               end) ->
             tool_call =
               ToolCall.new!(%{

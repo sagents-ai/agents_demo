@@ -85,7 +85,7 @@ defmodule AgentsDemoWeb.ChatLiveAgentStartupTest do
       submit_message(view, "Second conversation")
 
       # Wait for agent startup (may timeout)
-      Process.sleep(6000)
+      Process.sleep(300)
 
       # Check if second conversation was created
       second_conversation_id = extract_conversation_id(view)
