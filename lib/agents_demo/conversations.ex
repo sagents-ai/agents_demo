@@ -354,7 +354,7 @@ defmodule AgentsDemo.Conversations do
       message_type: message_type,
       content_type: "file_reference",
       content: content,
-      metadata: Map.get(opts, :metadata, %{})
+      metadata: Keyword.get(opts, :metadata, %{})
     })
   end
 
@@ -392,7 +392,7 @@ defmodule AgentsDemo.Conversations do
       message_type: message_type,
       content_type: "structured_data",
       content: content,
-      metadata: Map.get(opts, :metadata, %{})
+      metadata: Keyword.get(opts, :metadata, %{})
     })
   end
 
@@ -455,7 +455,7 @@ defmodule AgentsDemo.Conversations do
       message_type: message_type,
       content_type: "error",
       content: content,
-      metadata: Map.get(opts, :metadata, %{})
+      metadata: Keyword.get(opts, :metadata, %{})
     })
   end
 

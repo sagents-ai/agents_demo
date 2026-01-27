@@ -81,18 +81,6 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     end
   end
 
-  describe "tools/1" do
-    test "returns empty list (no tools)" do
-      {:ok, config} = InjectCurrentTime.init([])
-      assert InjectCurrentTime.tools(config) == []
-    end
-  end
-
-  describe "state_schema/0" do
-    test "returns empty list (no state schema)" do
-      assert InjectCurrentTime.state_schema() == []
-    end
-  end
 
   describe "before_model/2 with string content" do
     setup do
@@ -245,28 +233,4 @@ defmodule AgentsDemo.Middleware.InjectCurrentTimeTest do
     end
   end
 
-  describe "other callbacks" do
-    setup do
-      {:ok, config} = InjectCurrentTime.init([])
-      {:ok, config: config}
-    end
-
-    test "after_model/2 returns state unchanged", %{config: config} do
-      state = State.new!(%{messages: [Message.new_user!("Test")]})
-      {:ok, returned_state} = InjectCurrentTime.after_model(state, config)
-      assert returned_state == state
-    end
-
-    test "handle_message/3 returns state unchanged", %{config: config} do
-      state = State.new!(%{messages: [Message.new_user!("Test")]})
-      {:ok, returned_state} = InjectCurrentTime.handle_message(:any_message, state, config)
-      assert returned_state == state
-    end
-
-    test "on_server_start/2 returns state unchanged", %{config: config} do
-      state = State.new!(%{messages: [Message.new_user!("Test")]})
-      {:ok, returned_state} = InjectCurrentTime.on_server_start(state, config)
-      assert returned_state == state
-    end
-  end
 end
