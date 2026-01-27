@@ -67,6 +67,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:selected_file, nil)
      |> assign(:selected_file_path, nil)
      |> assign(:selected_file_content, nil)
+     |> assign(:file_view_mode, :rendered)
      |> assign(:is_thread_history_open, false)
      |> assign(:has_messages, false)
      |> assign(:streaming_delta, nil)
@@ -303,7 +304,14 @@ defmodule AgentsDemoWeb.ChatLive do
     {:noreply,
      socket
      |> assign(:selected_file_path, nil)
-     |> assign(:selected_file_content, nil)}
+     |> assign(:selected_file_content, nil)
+     |> assign(:file_view_mode, :rendered)}
+  end
+
+  @impl true
+  def handle_event("toggle_file_view_mode", _params, socket) do
+    new_mode = if socket.assigns.file_view_mode == :rendered, do: :raw, else: :rendered
+    {:noreply, assign(socket, :file_view_mode, new_mode)}
   end
 
   @impl true
@@ -1017,6 +1025,7 @@ defmodule AgentsDemoWeb.ChatLive do
         <.file_viewer_modal
           path={@selected_file_path}
           content={@selected_file_content}
+          view_mode={@file_view_mode}
         />
       <% end %>
     </div>

@@ -766,6 +766,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   attr :path, :string, required: true
   attr :content, :string
+  attr :view_mode, :atom, default: :rendered
 
   # Component: File Viewer Modal
   def file_viewer_modal(assigns) do
@@ -783,26 +784,45 @@ defmodule AgentsDemoWeb.ChatComponents do
               {Path.basename(@path)}
             </h2>
           </div>
-          <button
-            phx-click="close_file_modal"
-            class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors"
-            type="button"
-            title="Close"
-          >
-            <.icon name="hero-x-mark" class="w-5 h-5" />
-          </button>
+          <div class="flex items-center gap-2">
+            <%!-- View Mode Toggle --%>
+            <button
+              phx-click="toggle_file_view_mode"
+              class="px-3 py-1.5 bg-[var(--color-background)] border border-[var(--color-border)] text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors text-sm font-medium"
+              type="button"
+              title={if @view_mode == :rendered, do: "View Raw", else: "View Rendered"}
+            >
+              <%= if @view_mode == :rendered do %>
+                <.icon name="hero-code-bracket" class="w-4 h-4 inline-block mr-1" /> Raw
+              <% else %>
+                <.icon name="hero-document-text" class="w-4 h-4 inline-block mr-1" /> Rendered
+              <% end %>
+            </button>
+            <button
+              phx-click="close_file_modal"
+              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded hover:bg-[var(--color-border-light)] transition-colors"
+              type="button"
+              title="Close"
+            >
+              <.icon name="hero-x-mark" class="w-5 h-5" />
+            </button>
+          </div>
         </div>
         <%!-- File Path --%>
         <div class="px-6 py-2 bg-[var(--color-background)] border-b border-[var(--color-border)]">
           <span class="text-xs text-[var(--color-text-secondary)] font-mono">{@path}</span>
         </div>
         <%!-- File Content --%>
-        <div class="flex-1 overflow-hidden p-6">
-          <textarea
-            readonly
-            class="w-full h-full px-4 py-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-background)] text-[var(--color-text-primary)] text-sm font-mono resize-none focus:outline-none focus:border-[var(--color-primary)] transition-colors"
-            style="min-height: 400px;"
-          >{@content}</textarea>
+        <div class="flex-1 overflow-y-auto p-6">
+          <%= if @view_mode == :rendered do %>
+            <div class="prose prose-sm dark:prose-invert max-w-none">
+              {render_markdown(@content)}
+            </div>
+          <% else %>
+            <div class="w-full h-full">
+              {render_markdown_code(@content)}
+            </div>
+          <% end %>
         </div>
         <%!-- Modal Footer --%>
         <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
@@ -950,7 +970,6 @@ defmodule AgentsDemoWeb.ChatComponents do
       render: [
         unsafe_: true
       ]
-      # syntax_highlight: [formatter: {:html_inline, theme: "github_light"}]
     ]
   end
 
@@ -966,6 +985,17 @@ defmodule AgentsDemoWeb.ChatComponents do
     |> mdex_config()
     |> MDEx.new()
     |> MDEx.to_html!()
+    |> Phoenix.HTML.raw()
+  end
+
+  @doc """
+  Render code content with syntax highlighting using Autumn.
+  """
+  def render_markdown_code(nil), do: Phoenix.HTML.raw(nil)
+
+  def render_markdown_code(text) when is_binary(text) do
+    text
+    |> Autumn.highlight!(language: "markdown")
     |> Phoenix.HTML.raw()
   end
 
