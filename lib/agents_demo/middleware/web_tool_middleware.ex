@@ -168,8 +168,8 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
 
   defp build_web_lookup_tool(config) do
     Function.new!(%{
-      # make the `web_lookup` tool be async so they can run in parallel
-      async: true,
+      # ensure the `web_lookup` tool is NOT async. The underlying geckodriver errors with concurrent usage
+      async: false,
       name: "web_lookup",
       description: """
       Search the web, fetch the most relevant page, and extract key information.
