@@ -176,6 +176,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
 
       Returns structured information with source attribution.
       """,
+      display_text: "Searching the web",
       parameters_schema: %{
         type: "object",
         properties: %{
@@ -341,6 +342,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
     Function.new!(%{
       name: "search_web",
       description: "Search DuckDuckGo and return structured results with links",
+      display_text: "Searching web",
       parameters_schema: %{
         type: "object",
         properties: %{
@@ -369,6 +371,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
     Function.new!(%{
       name: "fetch_page",
       description: "Fetch a webpage and return its content as markdown",
+      display_text: "Fetching webpage",
       parameters_schema: %{
         type: "object",
         properties: %{

@@ -46,6 +46,11 @@ defmodule AgentsDemoWeb.ChatLive do
         "UTC"
       end
 
+    # Determine debug mode based on user preference
+    # For demo: default to false, allow toggle
+    # In production: could check user.role or permissions
+    debug_mode = false
+
     # For new conversations, agent_id will be set when conversation is created
     {:ok,
      socket
@@ -77,7 +82,8 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:conversations_loaded, 0)
      |> assign(:has_more_conversations, true)
      |> assign(:has_conversations, false)
-     |> assign(:page_title, "Agents Demo")}
+     |> assign(:page_title, "Agents Demo")
+     |> assign(:debug_mode, debug_mode)}
   end
 
   @impl true
@@ -445,6 +451,30 @@ defmodule AgentsDemoWeb.ChatLive do
         error_msg = "Failed to resume agent: #{inspect(reason)}"
         {:noreply, put_flash(socket, :error, error_msg)}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_debug_mode", _params, socket) do
+    # Toggle debug mode (per-viewer preference)
+    new_debug_mode = !socket.assigns.debug_mode
+
+    socket = assign(socket, :debug_mode, new_debug_mode)
+
+    # Re-render all existing messages with the new debug mode
+    # We need to reload them from the database to force a re-render
+    socket =
+      if socket.assigns.conversation_id do
+        stream(
+          socket,
+          :messages,
+          AgentsDemo.Conversations.load_display_messages(socket.assigns.conversation_id),
+          reset: true
+        )
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -1018,6 +1048,7 @@ defmodule AgentsDemoWeb.ChatLive do
           conversation_id={@conversation_id}
           has_more_conversations={@has_more_conversations}
           has_conversations={@has_conversations}
+          debug_mode={@debug_mode}
         />
       </div>
 
