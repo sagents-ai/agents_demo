@@ -352,6 +352,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :conversation_id, :string, default: nil
   attr :has_more_conversations, :boolean, default: false
   attr :has_conversations, :boolean, default: false
+  attr :debug_mode, :boolean, default: false
 
   # Component: Chat Interface
   def chat_interface(assigns) do
@@ -365,6 +366,19 @@ defmodule AgentsDemoWeb.ChatComponents do
 
         <div class="flex items-center gap-4">
           <div class="flex items-center gap-2">
+            <button
+              phx-click="toggle_debug_mode"
+              class={[
+                "p-2 rounded transition-colors",
+                @debug_mode && "bg-purple-600 text-white hover:bg-purple-700",
+                !@debug_mode && "bg-transparent text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+              ]}
+              type="button"
+              title={if @debug_mode, do: "Debug Mode: On (Click to disable)", else: "Debug Mode: Off (Click to enable)"}
+            >
+              <.icon name="hero-bug-ant" class="w-5 h-5" />
+            </button>
+
             <button
               phx-click="toggle_thread_history"
               class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
@@ -443,7 +457,7 @@ defmodule AgentsDemoWeb.ChatComponents do
                 class="flex flex-col gap-4"
               >
                 <div :for={{id, message} <- @streams.messages} id={id}>
-                  <.message message={message} />
+                  <.message message={message} debug_mode={@debug_mode} />
                 </div>
               </div>
             <% end %>
@@ -508,6 +522,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   end
 
   attr :message, :any, required: true
+  attr :debug_mode, :boolean, default: false
 
   # Component: Individual Message
   # Expects a DisplayMessage struct
@@ -522,18 +537,16 @@ defmodule AgentsDemoWeb.ChatComponents do
           content_text={get_in(@message.content, ["text"]) || ""}
         />
       <% "tool_call" -> %>
-        <.tool_call_display
-          call_id={get_in(@message.content, ["call_id"])}
-          name={get_in(@message.content, ["name"])}
-          arguments={get_in(@message.content, ["arguments"])}
-        />
+        <.tool_call_message message={@message} debug_mode={@debug_mode} />
       <% "tool_result" -> %>
-        <.tool_result_display
-          tool_call_id={get_in(@message.content, ["tool_call_id"])}
-          name={get_in(@message.content, ["name"])}
-          content={get_in(@message.content, ["content"])}
-          is_error={get_in(@message.content, ["is_error"]) || false}
-        />
+        <%= if @debug_mode do %>
+          <.tool_result_display
+            tool_call_id={get_in(@message.content, ["tool_call_id"])}
+            name={get_in(@message.content, ["name"])}
+            content={get_in(@message.content, ["content"])}
+            is_error={get_in(@message.content, ["is_error"]) || false}
+          />
+        <% end %>
       <% _other -> %>
         <.text_message
           message={@message}
@@ -628,37 +641,148 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
-  attr :call_id, :string, required: true
-  attr :name, :string, required: true
-  attr :arguments, :any, required: true
+  attr :message, :map, required: true
+  attr :debug_mode, :boolean, default: false
 
-  # Component: Tool Call Display (for DisplayMessage content)
-  def tool_call_display(assigns) do
-    # Format arguments as JSON string for display
-    assigns = assign(assigns, :args_json, format_tool_arguments(assigns.arguments))
+  # Component: Tool Call Message (with status and debug mode support)
+  def tool_call_message(assigns) do
+    ~H"""
+    <div class="tool-call-message ml-14" data-status={@message.status}>
+      <%= if @debug_mode do %>
+        <.tool_call_debug_view message={@message} />
+      <% else %>
+        <.tool_call_normal_view message={@message} />
+      <% end %>
+    </div>
+    """
+  end
+
+  # Normal user view - friendly display
+  defp tool_call_normal_view(assigns) do
+    display_text =
+      get_in(assigns.message.metadata, ["display_text"]) ||
+        friendly_fallback(get_in(assigns.message.content, ["name"]))
+
+    # Build icon class string based on status
+    icon_class =
+      case assigns.message.status do
+        "executing" -> "w-5 h-5 text-blue-500 animate-spin"
+        "completed" -> "w-5 h-5 text-green-600 dark:text-green-500"
+        "failed" -> "w-5 h-5 text-red-600 dark:text-red-500"
+        _ -> "w-5 h-5 text-gray-400"
+      end
+
+    assigns =
+      assigns
+      |> assign(:display_text, display_text)
+      |> assign(:icon_class, icon_class)
 
     ~H"""
-    <div class="ml-14">
-      <div class="bg-[var(--color-background)] border border-[var(--color-border)] rounded-lg p-3">
-        <div class="flex items-center gap-2 mb-2">
-          <.icon name="hero-wrench-screwdriver" class="w-4 h-4 text-[var(--color-primary)]" />
-          <span class="text-sm font-semibold text-[var(--color-text-primary)]">
-            Tool Call: {@name}
-          </span>
+    <div class="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+      <.icon
+        name={
+          cond do
+            @message.status == "executing" -> "hero-cog-6-tooth"
+            @message.status == "completed" -> "hero-check-circle"
+            @message.status == "failed" -> "hero-x-circle"
+            true -> "hero-ellipsis-horizontal-circle"
+          end
+        }
+        class={@icon_class}
+      />
+      <span class="text-sm text-gray-700 dark:text-gray-300">
+        {@display_text}
+        <%= if @message.status == "executing" do %>
+          <span class="inline-block ml-1 text-blue-500">...</span>
+        <% end %>
+      </span>
+
+      <%= if @message.status == "failed" do %>
+        <span class="text-xs text-red-600 dark:text-red-400 ml-auto">
+          Failed: {get_in(@message.metadata, ["error"])}
+        </span>
+      <% end %>
+    </div>
+    """
+  end
+
+  # Debug view - technical details (pending action theme - blue tint)
+  defp tool_call_debug_view(assigns) do
+    assigns = assign(assigns, :args_json, format_tool_arguments(get_in(assigns.message.content, ["arguments"])))
+    assigns = assign(assigns, :is_failed, assigns.message.status == "failed")
+    assigns = assign(assigns, :is_executing, assigns.message.status == "executing")
+
+    ~H"""
+    <div class={[
+      "border rounded-lg p-3",
+      @is_failed && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
+      !@is_failed && "bg-blue-50/30 dark:bg-blue-950/10 border-blue-200/50 dark:border-blue-900/30"
+    ]}>
+      <div class="flex items-center gap-2 mb-2">
+        <.icon
+          name={
+            cond do
+              @is_failed -> "hero-exclamation-triangle"
+              @is_executing -> "hero-arrow-path"
+              true -> "hero-check-circle"
+            end
+          }
+          class={
+            cond do
+              @is_failed -> "w-4 h-4 text-red-600"
+              @is_executing -> "w-4 h-4 text-blue-600 animate-spin"
+              true -> "w-4 h-4 text-green-600"
+            end
+          }
+        />
+        <span class={[
+          "text-sm font-semibold",
+          @is_failed && "text-red-700 dark:text-red-400",
+          !@is_failed && "text-blue-700 dark:text-blue-400"
+        ]}>
+          Tool Call: {get_in(@message.content, ["name"])}
+        </span>
+      </div>
+
+      <div class="pl-6 text-[var(--color-text-secondary)]">
+        <div class="text-xs mb-2">
+          <span class="text-gray-600 dark:text-gray-400">Call ID:</span>
+          <span class="ml-2 font-mono text-gray-900 dark:text-gray-100">{get_in(@message.content, ["call_id"])}</span>
         </div>
+
         <%= if @args_json && @args_json != "{}" do %>
-          <div class="mt-2 pl-6">
-            <details class="text-xs">
-              <summary class="cursor-pointer text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
-                Arguments
-              </summary>
-              <pre class="mt-2 p-2 bg-[var(--color-surface)] rounded text-[var(--color-text-secondary)] overflow-x-auto"><code>{@args_json}</code></pre>
-            </details>
-          </div>
+          <details class="text-xs">
+            <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1">
+              Arguments
+            </summary>
+            <div
+              class="mt-2 p-2 bg-[var(--color-background)] rounded whitespace-pre-wrap font-mono text-xs"
+              phx-no-format
+            >{@args_json}</div>
+          </details>
+        <% end %>
+
+        <%= if @is_failed do %>
+          <details class="text-xs mt-2" open>
+            <summary class="cursor-pointer hover:text-[var(--color-text-primary)] mb-1 text-red-600 dark:text-red-400 font-semibold">
+              Error
+            </summary>
+            <div class="mt-2 p-2 bg-red-50 dark:bg-red-950 rounded text-red-800 dark:text-red-300">
+              {get_in(@message.metadata, ["error"])}
+            </div>
+          </details>
         <% end %>
       </div>
     </div>
     """
+  end
+
+  defp friendly_fallback(nil), do: "Tool"
+
+  defp friendly_fallback(tool_name) do
+    tool_name
+    |> String.replace("_", " ")
+    |> String.capitalize()
   end
 
   attr :tool_call_id, :string, required: true
@@ -667,20 +791,25 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :is_error, :boolean, default: false
 
   # Component: Tool Result Display (for DisplayMessage content)
+  # Completion action theme - green tint for success, red for errors
   def tool_result_display(assigns) do
     ~H"""
     <div class="ml-14">
       <div class={[
         "border rounded-lg p-3",
-        @is_error && "bg-red-50 border-red-200",
-        !@is_error && "bg-[var(--color-surface)] border-[var(--color-border)]"
+        @is_error && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
+        !@is_error && "bg-green-50/30 dark:bg-green-950/10 border-green-200/50 dark:border-green-900/30"
       ]}>
         <div class="flex items-center gap-2 mb-2">
           <.icon
             name={if @is_error, do: "hero-exclamation-triangle", else: "hero-check-circle"}
             class={if @is_error, do: "w-4 h-4 text-red-600", else: "w-4 h-4 text-green-600"}
           />
-          <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+          <span class={[
+            "text-sm font-semibold",
+            @is_error && "text-red-700 dark:text-red-400",
+            !@is_error && "text-green-700 dark:text-green-400"
+          ]}>
             Tool Result: {@name}
           </span>
         </div>
@@ -730,9 +859,13 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   # Component: Streaming Message (being typed)
   def streaming_message(assigns) do
+    # Extract tool call info from delta metadata
+    tool_calls = MessageDelta.get_tool_display_info(assigns.streaming_delta)
+
     # Convert merged_content to string for display
     assigns =
       assigns
+      |> assign(:tool_calls, tool_calls)
       |> assign(
         :thinking,
         MessageDelta.content_to_string(assigns.streaming_delta, :thinking)
@@ -743,23 +876,64 @@ defmodule AgentsDemoWeb.ChatComponents do
       )
 
     ~H"""
-    <div class="flex gap-4 max-w-full">
-      <div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-[var(--color-avatar-bg)] text-[var(--color-primary)]">
-        <.icon name="hero-cpu-chip" class="w-5 h-5" />
-      </div>
+    <div>
+      <%!-- Message bubble with thinking, text, and cursor --%>
+      <div class="flex gap-4 max-w-full">
+        <div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-[var(--color-avatar-bg)] text-[var(--color-primary)]">
+          <.icon name="hero-cpu-chip" class="w-5 h-5" />
+        </div>
 
-      <div class="flex-1 min-w-0">
-        <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-          <.thinking_display
-            :if={@thinking}
-            class="mb-2"
-            message_id="streaming_delta"
-            content_text={@thinking}
-          />
-          <.markdown text={@content} />
-          <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
+        <div class="flex-1 min-w-0">
+          <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
+            <.thinking_display
+              :if={@thinking}
+              class="mb-2"
+              message_id="streaming_delta"
+              content_text={@thinking}
+            />
+
+            <%!-- Show text content if present --%>
+            <%= if @content != "" do %>
+              <div>
+                <.markdown text={@content} />
+              </div>
+            <% end %>
+
+            <%!-- Blinking cursor - only show when no tool calls (message still streaming) --%>
+            <%= if @tool_calls == [] do %>
+              <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
+            <% end %>
+          </div>
         </div>
       </div>
+
+      <%= if @tool_calls != [] do %>
+        <div class="flex flex-col gap-2 mt-2">
+          <%= for tool <- @tool_calls do %>
+            <div class="tool-call-message ml-14">
+              <div class="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+                <%!-- Different icons based on tool status --%>
+                <%= cond do %>
+                  <% tool.status == :identified -> %>
+                    <%!-- Tool identified but not executing yet --%>
+                    <.icon name="hero-sparkles" class="w-5 h-5 text-blue-500 animate-pulse" />
+
+                  <% tool.status == :executing -> %>
+                    <%!-- Tool executing --%>
+                    <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-blue-500 animate-spin" />
+
+                  <% true -> %>
+                    <%!-- Fallback --%>
+                    <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-blue-500" />
+                <% end %>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  <%= tool.display_name %>
+                </span>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
     </div>
     """
   end
