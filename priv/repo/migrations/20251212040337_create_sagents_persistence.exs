@@ -46,6 +46,8 @@ defmodule AgentsDemo.Repo.Migrations.CreateSagentsPersistence do
       add :content, :map, null: false
       # Content type for rendering
       add :content_type, :string, null: false, default: "text"
+      # Tool execution status: "pending", "executing", "completed", "failed"
+      add :status, :string, default: "completed"
       # Message-local ordering (0-based within same timestamp)
       add :sequence, :integer, default: 0, null: false
       add :metadata, :map, default: %{}
@@ -56,5 +58,15 @@ defmodule AgentsDemo.Repo.Migrations.CreateSagentsPersistence do
     create index(:sagents_display_messages, [:conversation_id, :inserted_at, :sequence])
     # For filtering by content type
     create index(:sagents_display_messages, [:content_type])
+    # For filtering by status (e.g., pending tools)
+    create index(:sagents_display_messages, [:status])
+
+    # Unique partial index to prevent duplicate tool call IDs per conversation
+    create unique_index(
+             :sagents_display_messages,
+             [:conversation_id, "(content->>'call_id')"],
+             name: :unique_tool_call_per_conversation,
+             where: "content_type = 'tool_call'"
+           )
   end
 end

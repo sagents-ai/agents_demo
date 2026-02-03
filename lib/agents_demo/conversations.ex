@@ -51,9 +51,6 @@ defmodule AgentsDemo.Conversations do
   alias AgentsDemo.Conversations.Conversation
   alias AgentsDemo.Conversations.DisplayMessage
   alias AgentsDemo.Accounts.Scope, as: Scope
-  alias LangChain.Message.ContentPart
-  alias LangChain.Message.ToolCall
-  alias LangChain.Message.ToolResult
 
   #
   # Conversation CRUD
@@ -275,440 +272,128 @@ defmodule AgentsDemo.Conversations do
   end
 
   @doc """
-  Appends a thinking block to the conversation.
+  Updates a pending tool call message to "executing" status.
 
-  Thinking blocks are internal AI reasoning that should be visually
-  distinguished from regular responses. Only valid for "assistant" message type.
-
-  ## Examples
-
-      append_thinking_message(convo_id, "Let me analyze this step by step...")
-  """
-  def append_thinking_message(conversation_id, thinking_text) do
-    append_display_message(conversation_id, %{
-      message_type: "assistant",
-      content_type: "thinking",
-      content: %{"text" => thinking_text}
-    })
-  end
-
-  @doc """
-  Appends an image message to the conversation.
+  This is called when a tool begins execution, transitioning from "pending" to "executing".
 
   ## Parameters
-
-    * `conversation_id` - The conversation ID
-    * `image_url` - URL to the image
-    * `opts` - Options:
-      * `:message_type` - Message type (default: "assistant")
-      * `:alt_text` - Alt text for the image
-      * `:caption` - Caption to display
-
-  ## Examples
-
-      append_image_message(convo_id, "/uploads/chart.png", alt_text: "Sales Chart")
-      append_image_message(convo_id, "https://example.com/image.jpg",
-        message_type: "tool", caption: "Generated chart")
-  """
-  def append_image_message(conversation_id, image_url, opts \\ []) do
-    content = %{"url" => image_url}
-    content = if alt = opts[:alt_text], do: Map.put(content, "alt_text", alt), else: content
-    content = if caption = opts[:caption], do: Map.put(content, "caption", caption), else: content
-
-    message_type = opts[:message_type] || "assistant"
-
-    append_display_message(conversation_id, %{
-      message_type: message_type,
-      content_type: "image",
-      content: content
-    })
-  end
-
-  @doc """
-  Appends a file reference message to the conversation.
-
-  ## Parameters
-
-    * `conversation_id` - The conversation ID
-    * `file_path` - Path to the file
-    * `file_name` - Display name of the file
-    * `opts` - Options:
-      * `:message_type` - Message type (default: "tool")
-      * `:size` - File size in bytes
-      * `:mime_type` - MIME type
-      * `:metadata` - Additional metadata
-
-  ## Examples
-
-      append_file_message(convo_id, "/tmp/report.pdf", "Q4 Report.pdf",
-        size: 245760, mime_type: "application/pdf")
-  """
-  def append_file_message(conversation_id, file_path, file_name, opts \\ []) do
-    content = %{"path" => file_path, "name" => file_name}
-    content = if size = opts[:size], do: Map.put(content, "size", size), else: content
-    content = if mime = opts[:mime_type], do: Map.put(content, "mime_type", mime), else: content
-
-    message_type = opts[:message_type] || "tool"
-
-    append_display_message(conversation_id, %{
-      message_type: message_type,
-      content_type: "file_reference",
-      content: content,
-      metadata: Keyword.get(opts, :metadata, %{})
-    })
-  end
-
-  @doc """
-  Appends a structured data message to the conversation.
-
-  ## Parameters
-
-    * `conversation_id` - The conversation ID
-    * `format` - Data format ("table", "json", "list")
-    * `data` - The data to display
-    * `opts` - Options:
-      * `:message_type` - Message type (default: "tool")
-      * `:columns` - Column headers for tables
-      * `:metadata` - Additional metadata
-
-  ## Examples
-
-      # Table format
-      append_structured_data_message(convo_id, "table",
-        [["North", 125000], ["South", 98000]],
-        columns: ["Region", "Sales"])
-
-      # JSON format
-      append_structured_data_message(convo_id, "json",
-        %{"status" => "success", "count" => 42})
-  """
-  def append_structured_data_message(conversation_id, format, data, opts \\ []) do
-    content = %{"format" => format, "data" => data}
-    content = if columns = opts[:columns], do: Map.put(content, "columns", columns), else: content
-
-    message_type = opts[:message_type] || "tool"
-
-    append_display_message(conversation_id, %{
-      message_type: message_type,
-      content_type: "structured_data",
-      content: content,
-      metadata: Keyword.get(opts, :metadata, %{})
-    })
-  end
-
-  @doc """
-  Appends a notification message to the conversation.
-
-  ## Parameters
-
-    * `conversation_id` - The conversation ID
-    * `text` - Notification text
-    * `opts` - Options:
-      * `:level` - Notification level ("info", "warning", "success") (default: "info")
-      * `:details` - Additional details
-
-  ## Examples
-
-      append_notification_message(convo_id, "Conversation was compacted",
-        level: "info", details: %{"messages_removed" => 15})
-  """
-  def append_notification_message(conversation_id, text, opts \\ []) do
-    level = opts[:level] || "info"
-    content = %{"text" => text, "level" => level}
-    content = if details = opts[:details], do: Map.put(content, "details", details), else: content
-
-    append_display_message(conversation_id, %{
-      message_type: "system",
-      content_type: "notification",
-      content: content
-    })
-  end
-
-  @doc """
-  Appends an error message to the conversation.
-
-  ## Parameters
-
-    * `conversation_id` - The conversation ID
-    * `error_text` - Error message text
-    * `opts` - Options:
-      * `:message_type` - Message type (default: "tool")
-      * `:code` - Error code
-      * `:details` - Additional error details
-      * `:metadata` - Additional metadata (e.g., tool name)
-
-  ## Examples
-
-      append_error_message(convo_id, "Failed to connect to database",
-        code: "DB_CONNECTION_ERROR",
-        details: "Connection timeout after 30s",
-        metadata: %{"tool_name" => "database_query"})
-  """
-  def append_error_message(conversation_id, error_text, opts \\ []) do
-    content = %{"text" => error_text}
-    content = if code = opts[:code], do: Map.put(content, "code", code), else: content
-    content = if details = opts[:details], do: Map.put(content, "details", details), else: content
-
-    message_type = opts[:message_type] || "tool"
-
-    append_display_message(conversation_id, %{
-      message_type: message_type,
-      content_type: "error",
-      content: content,
-      metadata: Keyword.get(opts, :metadata, %{})
-    })
-  end
-
-  #
-  # Tool Call/Result Message Functions
-  #
-
-  @doc """
-  Appends a tool call as a DisplayMessage to the conversation.
-
-  Tool calls represent the assistant requesting to execute a tool.
-  Each tool call includes the tool name, arguments, and a unique call_id.
-
-  ## Parameters
-
-  - conversation_id: UUID of the conversation
-  - tool_call: LangChain.Message.ToolCall struct with call_id, name, and arguments
+    - call_id: The tool call ID (from content.call_id)
 
   ## Returns
-
-  - {:ok, %DisplayMessage{}} on success
-  - {:error, changeset} on validation failure
-
-  ## Example
-
-      tool_call = %ToolCall{
-        call_id: "call_123",
-        name: "search_web",
-        arguments: %{"query" => "Oslo attractions"}
-      }
-
-      {:ok, display_msg} = append_tool_call_message(conversation_id, tool_call)
-  """
-  @spec append_tool_call_message(Ecto.UUID.t(), ToolCall.t()) ::
-          {:ok, DisplayMessage.t()} | {:error, Ecto.Changeset.t()}
-  def append_tool_call_message(conversation_id, %ToolCall{} = tool_call) do
-    content = %{
-      "call_id" => tool_call.call_id,
-      "name" => tool_call.name,
-      "arguments" => tool_call.arguments
-    }
-
-    attrs = %{
-      message_type: "assistant",
-      content_type: "tool_call",
-      content: content,
-      sequence: 0,
-      metadata: %{}
-    }
-
-    conversation_id
-    |> DisplayMessage.create_changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Appends a tool result as a DisplayMessage to the conversation.
-
-  Tool results represent the system's response after executing a tool.
-  Each result includes the tool_call_id (linking back to the request),
-  tool name, result content, and error status.
-
-  ## Parameters
-
-  - conversation_id: UUID of the conversation
-  - tool_result: LangChain.Message.ToolResult struct
-
-  ## Returns
-
-  - {:ok, %DisplayMessage{}} on success
-  - {:error, changeset} on validation failure
+    - {:ok, %DisplayMessage{}} on success
+    - {:error, :not_found} if no pending tool call with this call_id exists
+    - {:error, changeset} on validation failure
 
   ## Example
-
-      tool_result = %ToolResult{
-        tool_call_id: "call_123",
-        name: "search_web",
-        content: "Found 5 attractions in Oslo...",
-        is_error: false
-      }
-
-      {:ok, display_msg} = append_tool_result_message(conversation_id, tool_result)
+      iex> mark_tool_executing("call_123")
+      {:ok, %DisplayMessage{status: "executing", ...}}
   """
-  @spec append_tool_result_message(Ecto.UUID.t(), ToolResult.t()) ::
-          {:ok, DisplayMessage.t()} | {:error, Ecto.Changeset.t()}
-  def append_tool_result_message(conversation_id, %ToolResult{} = tool_result) do
-    # Use built-in ContentPart helper - handles nil, string, and [ContentPart] cases
-    content_str = ContentPart.content_to_string(tool_result.content) || ""
+  @spec mark_tool_executing(String.t()) ::
+          {:ok, DisplayMessage.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def mark_tool_executing(call_id) do
+    query =
+      from m in DisplayMessage,
+        where: fragment("?->>'call_id' = ?", m.content, ^call_id),
+        where: m.content_type == "tool_call",
+        where: m.status == "pending"
 
-    content = %{
-      "tool_call_id" => tool_result.tool_call_id,
-      "name" => tool_result.name,
-      "content" => content_str,
-      "is_error" => tool_result.is_error
-    }
+    case Repo.one(query) do
+      nil ->
+        {:error, :not_found}
 
-    attrs = %{
-      message_type: "tool",
-      content_type: "tool_result",
-      content: content,
-      sequence: 0,
-      metadata: %{}
-    }
-
-    conversation_id
-    |> DisplayMessage.create_changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Appends multiple tool calls as DisplayMessages to the conversation.
-
-  When an assistant message includes multiple tool calls, this function
-  creates a DisplayMessage for each one with proper sequence ordering.
-
-  ## Parameters
-
-  - conversation_id: UUID of the conversation
-  - tool_calls: List of LangChain.Message.ToolCall structs
-
-  ## Returns
-
-  - {:ok, [%DisplayMessage{}, ...]} on success (list of created messages)
-  - {:error, changeset} on validation failure
-
-  ## Example
-
-      tool_calls = [
-        %ToolCall{call_id: "call_1", name: "search_web", arguments: %{...}},
-        %ToolCall{call_id: "call_2", name: "get_weather", arguments: %{...}}
-      ]
-
-      {:ok, display_msgs} = append_tool_calls_batch(conversation_id, tool_calls)
-  """
-  @spec append_tool_calls_batch(Ecto.UUID.t(), [ToolCall.t()]) ::
-          {:ok, [DisplayMessage.t()]} | {:error, Ecto.Changeset.t()}
-  def append_tool_calls_batch(conversation_id, tool_calls) when is_list(tool_calls) do
-    results =
-      tool_calls
-      |> Enum.with_index()
-      |> Enum.map(fn {tool_call, index} ->
-        content = %{
-          "call_id" => tool_call.call_id,
-          "name" => tool_call.name,
-          "arguments" => tool_call.arguments
-        }
-
-        attrs = %{
-          message_type: "assistant",
-          content_type: "tool_call",
-          content: content,
-          sequence: index,
-          metadata: %{}
-        }
-
-        conversation_id
-        |> DisplayMessage.create_changeset(attrs)
-        |> Repo.insert()
-      end)
-
-    errors = Enum.filter(results, &match?({:error, _}, &1))
-
-    if Enum.empty?(errors) do
-      {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
-    else
-      hd(errors)
+      message ->
+        message
+        |> DisplayMessage.changeset(%{"status" => "executing"})
+        |> Repo.update()
     end
   end
 
   @doc """
-  Appends multiple tool results as DisplayMessages to the conversation.
+  Updates a tool call message to "completed" status and adds result metadata.
 
-  When a tool message includes multiple results, this function creates
-  a DisplayMessage for each one with proper sequence ordering.
+  This is called when a tool successfully completes execution. Accepts tool calls in
+  either "pending" or "executing" status.
 
   ## Parameters
-
-  - conversation_id: UUID of the conversation
-  - tool_results: List of LangChain.Message.ToolResult structs
+    - call_id: The tool call ID
+    - result_metadata: Map containing result information (e.g., %{"result" => "success"})
 
   ## Returns
-
-  - {:ok, [%DisplayMessage{}, ...]} on success (list of created messages)
-  - {:error, changeset} on validation failure
+    - {:ok, %DisplayMessage{}} on success
+    - {:error, :not_found} if no pending/executing tool call with this call_id exists
+    - {:error, changeset} on validation failure
 
   ## Example
-
-      tool_results = [
-        %ToolResult{tool_call_id: "call_1", name: "search_web", content: "..."},
-        %ToolResult{tool_call_id: "call_2", name: "get_weather", content: "..."}
-      ]
-
-      {:ok, display_msgs} = append_tool_results_batch(conversation_id, tool_results)
+      iex> complete_tool_call("call_123", %{"result" => "File written successfully"})
+      {:ok, %DisplayMessage{status: "completed", metadata: %{"result" => ...}}}
   """
-  @spec append_tool_results_batch(Ecto.UUID.t(), [ToolResult.t()]) ::
-          {:ok, [DisplayMessage.t()]} | {:error, Ecto.Changeset.t()}
-  def append_tool_results_batch(conversation_id, tool_results) when is_list(tool_results) do
-    results =
-      tool_results
-      |> Enum.with_index()
-      |> Enum.map(fn {tool_result, index} ->
-        # Use built-in ContentPart helper - handles nil, string, and [ContentPart] cases
-        content_str = ContentPart.content_to_string(tool_result.content) || ""
+  @spec complete_tool_call(String.t(), map()) ::
+          {:ok, DisplayMessage.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def complete_tool_call(call_id, result_metadata \\ %{}) do
+    query =
+      from m in DisplayMessage,
+        where: fragment("?->>'call_id' = ?", m.content, ^call_id),
+        where: m.content_type == "tool_call",
+        where: m.status in ["pending", "executing"]
 
-        content = %{
-          "tool_call_id" => tool_result.tool_call_id,
-          "name" => tool_result.name,
-          "content" => content_str,
-          "is_error" => tool_result.is_error
-        }
+    case Repo.one(query) do
+      nil ->
+        {:error, :not_found}
 
-        attrs = %{
-          message_type: "tool",
-          content_type: "tool_result",
-          content: content,
-          sequence: index,
-          metadata: %{}
-        }
+      message ->
+        updated_metadata = Map.merge(message.metadata, result_metadata)
 
-        conversation_id
-        |> DisplayMessage.create_changeset(attrs)
-        |> Repo.insert()
-      end)
-
-    errors = Enum.filter(results, &match?({:error, _}, &1))
-
-    if Enum.empty?(errors) do
-      {:ok, Enum.map(results, fn {:ok, msg} -> msg end)}
-    else
-      hd(errors)
+        message
+        |> DisplayMessage.changeset(%{
+          "status" => "completed",
+          "metadata" => updated_metadata
+        })
+        |> Repo.update()
     end
   end
 
   @doc """
-  Filters messages by content type.
+  Updates a tool call message to "failed" status and adds error information.
 
-  ## Examples
+  This is called when a tool execution fails. Accepts tool calls in either "pending"
+  or "executing" status.
 
-      load_display_messages_by_type(convo_id, "thinking")
-      load_display_messages_by_type(convo_id, "image", limit: 10)
+  ## Parameters
+    - call_id: The tool call ID
+    - error_info: Map containing error details (e.g., %{"error" => "File not found"})
+
+  ## Returns
+    - {:ok, %DisplayMessage{}} on success
+    - {:error, :not_found} if no pending/executing tool call with this call_id exists
+    - {:error, changeset} on validation failure
+
+  ## Example
+      iex> fail_tool_call("call_123", %{"error" => "Permission denied"})
+      {:ok, %DisplayMessage{status: "failed", metadata: %{"error" => ...}}}
   """
-  def load_display_messages_by_type(conversation_id, content_type, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 100)
-    offset = Keyword.get(opts, :offset, 0)
+  @spec fail_tool_call(String.t(), map()) ::
+          {:ok, DisplayMessage.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def fail_tool_call(call_id, error_info \\ %{}) do
+    query =
+      from m in DisplayMessage,
+        where: fragment("?->>'call_id' = ?", m.content, ^call_id),
+        where: m.content_type == "tool_call",
+        where: m.status in ["pending", "executing"]
 
-    from(m in DisplayMessage,
-      where: m.conversation_id == ^conversation_id,
-      where: m.content_type == ^content_type,
-      order_by: [asc: m.inserted_at, asc: m.sequence],
-      limit: ^limit,
-      offset: ^offset
-    )
-    |> Repo.all()
+    case Repo.one(query) do
+      nil ->
+        {:error, :not_found}
+
+      message ->
+        updated_metadata = Map.merge(message.metadata, error_info)
+
+        message
+        |> DisplayMessage.changeset(%{
+          "status" => "failed",
+          "metadata" => updated_metadata
+        })
+        |> Repo.update()
+    end
   end
 
   @doc """

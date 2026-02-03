@@ -7,10 +7,10 @@ defmodule AgentsDemoWeb.ChatLive do
   alias Sagents.AgentServer
   alias Sagents.FileSystemServer
   alias LangChain.Message
-  alias LangChain.MessageDelta
   alias AgentsDemo.Conversations
   alias AgentsDemo.Agents.Coordinator
   alias AgentsDemo.Agents.DemoSetup
+  alias AgentsDemoWeb.AgentLiveHelpers
 
   @impl true
   def mount(_params, _session, socket) do
@@ -58,7 +58,6 @@ defmodule AgentsDemoWeb.ChatLive do
      |> stream(:conversation_list, [])
      |> assign(:input, "")
      |> assign(:loading, false)
-     |> assign(:thread_id, nil)
      |> assign(:conversation, nil)
      |> assign(:conversation_id, nil)
      |> assign(:agent_id, nil)
@@ -480,75 +479,23 @@ defmodule AgentsDemoWeb.ChatLive do
   @impl true
   def handle_info({:agent, {:status_changed, :running, nil}}, socket) do
     Logger.info("Agent is running")
-    {:noreply, assign(socket, :agent_status, :running)}
+    {:noreply, AgentLiveHelpers.handle_status_running(socket)}
   end
 
   @impl true
   def handle_info({:agent, {:status_changed, :idle, _data}}, socket) do
     Logger.info("Agent returned to idle state (execution completed)")
-
-    # Persist agent state after successful completion
-    persist_agent_state(socket, "on_completion")
-
-    # Don't create messages here - they should be added via :llm_message and :tool_response handlers
-    {:noreply,
-     socket
-     |> assign(:loading, false)
-     |> assign(:agent_status, :idle)
-     |> assign_filesystem_files()}
+    {:noreply, AgentLiveHelpers.handle_status_idle(socket)}
   end
 
   @impl true
   def handle_info({:agent, {:status_changed, :cancelled, _data}}, socket) do
     Logger.info("Agent execution was cancelled")
 
-    # Persist cancellation message to database and display it
-    cancellation_text = "_Agent execution cancelled by user. Partial response discarded._"
-
-    cancellation_message =
-      if socket.assigns.conversation_id do
-        # Persist to database
-        case Conversations.append_text_message(
-               socket.assigns.conversation_id,
-               "assistant",
-               cancellation_text
-             ) do
-          {:ok, display_msg} ->
-            display_msg
-
-          {:error, reason} ->
-            Logger.error("Failed to persist cancellation message: #{inspect(reason)}")
-            # Create fallback in-memory message
-            %{
-              id: generate_id(),
-              message_type: :assistant,
-              content_type: "text",
-              content: %{"text" => cancellation_text},
-              timestamp: DateTime.utc_now()
-            }
-        end
-      else
-        # No conversation yet - create in-memory message
-        %{
-          id: generate_id(),
-          message_type: :assistant,
-          content_type: "text",
-          content: %{"text" => cancellation_text},
-          timestamp: DateTime.utc_now()
-        }
-      end
-
-    # Note: We do NOT persist agent state after cancellation because the state
-    # may be in an inconsistent/incomplete state after the task was brutally killed
-
     {:noreply,
      socket
-     |> assign(:loading, false)
-     |> assign(:agent_status, :cancelled)
-     |> assign(:streaming_delta, nil)
-     |> stream_insert(:messages, cancellation_message)
-     |> push_event("scroll-to-bottom", %{})
-     |> assign_filesystem_files()}
+     |> AgentLiveHelpers.handle_status_cancelled()
+     |> push_event("scroll-to-bottom", %{})}
   end
 
   @impl true
@@ -556,77 +503,13 @@ defmodule AgentsDemoWeb.ChatLive do
     Logger.info("Agent execution interrupted - awaiting human approval")
     Logger.debug("Interrupt data: #{inspect(interrupt_data)}")
 
-    # Extract action_requests (pending tool calls needing approval)
-    action_requests = Map.get(interrupt_data, :action_requests, [])
-
-    # Persist agent state to preserve context including the interrupt state
-    persist_agent_state(socket, "on_interrupt")
-
-    {:noreply,
-     socket
-     |> assign(:loading, false)
-     |> assign(:agent_status, :interrupted)
-     |> assign(:pending_tools, action_requests)
-     |> assign(:interrupt_data, interrupt_data)}
+    {:noreply, AgentLiveHelpers.handle_status_interrupted(socket, interrupt_data)}
   end
 
   @impl true
   def handle_info({:agent, {:status_changed, :error, reason}}, socket) do
     Logger.error("Agent execution failed: #{inspect(reason)}")
-
-    error_display =
-      case reason do
-        %LangChain.LangChainError{} = error ->
-          error.message
-
-        other ->
-          inspect(other)
-      end
-
-    # Persist error message to database and display it
-    error_text = "Sorry, I encountered an error: #{error_display}"
-
-    error_message =
-      if socket.assigns.conversation_id do
-        # Persist to database
-        case Conversations.append_text_message(
-               socket.assigns.conversation_id,
-               "assistant",
-               error_text
-             ) do
-          {:ok, display_msg} ->
-            display_msg
-
-          {:error, persist_reason} ->
-            Logger.error("Failed to persist error message: #{inspect(persist_reason)}")
-            # Create fallback in-memory message
-            %{
-              id: generate_id(),
-              message_type: :assistant,
-              content_type: "text",
-              content: %{"text" => error_text},
-              timestamp: DateTime.utc_now()
-            }
-        end
-      else
-        # No conversation yet - create in-memory message
-        %{
-          id: generate_id(),
-          message_type: :assistant,
-          content_type: "text",
-          content: %{"text" => error_text},
-          timestamp: DateTime.utc_now()
-        }
-      end
-
-    # Persist agent state to preserve context up to the error
-    persist_agent_state(socket, "on_error")
-
-    {:noreply,
-     socket
-     |> assign(:loading, false)
-     |> assign(:agent_status, :error)
-     |> stream_insert(:messages, error_message)}
+    {:noreply, AgentLiveHelpers.handle_status_error(socket, reason)}
   end
 
   @impl true
@@ -637,36 +520,32 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_info({:agent, {:llm_deltas, deltas}}, socket) do
-    # Append deltas to current streaming message
-    socket =
-      socket
-      |> update_streaming_message(deltas)
-      |> push_event("scroll-to-bottom", %{})
-
-    {:noreply, socket}
+    {:noreply,
+     socket
+     |> AgentLiveHelpers.handle_llm_deltas(deltas)
+     |> push_event("scroll-to-bottom", %{})}
   end
 
   @impl true
   def handle_info({:agent, {:llm_message, _message}}, socket) do
-    # Complete message received - clear streaming state
-    # This event signals that message processing is complete (separate from display)
-    Logger.info("Complete LLM message received")
+    {:noreply, AgentLiveHelpers.handle_llm_message_complete(socket)}
+  end
+
+  @impl true
+  def handle_info({:agent, {:display_messages_batch_saved, display_messages}}, socket) do
+    Logger.debug("Batch saved #{length(display_messages)} messages, reloading once")
 
     {:noreply,
      socket
-     |> assign(:streaming_delta, nil)
-     |> assign(:loading, false)}
-
-    # Note: No persistence, no UI update here!
-    # Messages already saved and displayed via {:display_message_saved, msg} events
+     |> AgentLiveHelpers.handle_display_messages_batch_saved(display_messages)
+     |> push_event("scroll-to-bottom", %{})}
   end
 
   @impl true
   def handle_info({:agent, {:display_message_saved, display_msg}}, socket) do
     {:noreply,
      socket
-     |> assign(:has_messages, true)
-     |> stream_insert(:messages, display_msg)
+     |> AgentLiveHelpers.handle_display_message_saved(display_msg)
      |> push_event("scroll-to-bottom", %{})}
   end
 
@@ -679,68 +558,72 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_info({:agent, {:conversation_title_generated, new_title, agent_id}}, socket) do
-    # Verify this is for our agent and we have a current conversation
-    if agent_id == socket.assigns.agent_id && socket.assigns.conversation do
-      # Update database
-      case Conversations.update_conversation(socket.assigns.conversation, %{title: new_title}) do
-        {:ok, updated_conversation} ->
-          Logger.info("Updated conversation title to: #{new_title}")
+    Logger.info("Conversation title generated: #{new_title}")
 
-          # Persist the agent state now that the title is in metadata
-          state_data = AgentServer.export_state(socket.assigns.agent_id)
-
-          case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
-            {:ok, _} ->
-              Logger.debug(
-                "Persisted agent state with title metadata for conversation #{socket.assigns.conversation_id}"
-              )
-
-            {:error, reason} ->
-              Logger.error(
-                "Failed to persist agent state after title generation: #{inspect(reason)}"
-              )
-          end
-
-          # Build page title from new title
-          page_title =
-            if String.length(new_title) > 60 do
-              truncated = String.slice(new_title, 0, 60)
-              "#{truncated}... - Agents Demo"
-            else
-              "#{new_title} - Agents Demo"
-            end
-
-          socket =
-            socket
-            |> assign(:conversation, updated_conversation)
-            |> assign(:page_title, page_title)
-
-          # If thread history is open, update the conversation in the stream
-          socket =
-            if socket.assigns.is_thread_history_open do
-              stream_insert(socket, :conversation_list, updated_conversation)
-            else
-              socket
-            end
-
-          {:noreply, socket}
-
-        {:error, reason} ->
-          Logger.error("Failed to update conversation title: #{inspect(reason)}")
-          {:noreply, socket}
+    # Build page title from new title (application-specific UI concern)
+    page_title =
+      if String.length(new_title) > 60 do
+        truncated = String.slice(new_title, 0, 60)
+        "#{truncated}... - Agents Demo"
+      else
+        "#{new_title} - Agents Demo"
       end
-    else
-      {:noreply, socket}
-    end
+
+    socket =
+      socket
+      |> AgentLiveHelpers.handle_conversation_title_generated(new_title, agent_id)
+      |> assign(:page_title, page_title)
+
+    # Update conversation list if thread history is open (application-specific UI)
+    socket =
+      if socket.assigns[:is_thread_history_open] && socket.assigns[:conversation] do
+        stream_insert(socket, :conversation_list, socket.assigns.conversation)
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   @impl true
   def handle_info({:agent, {:agent_shutdown, shutdown_data}}, socket) do
-    Logger.info("Agent #{shutdown_data.agent_id} shutting down: #{shutdown_data.reason}")
+    {:noreply, AgentLiveHelpers.handle_agent_shutdown(socket, shutdown_data)}
+  end
 
-    # Clear the agent_id since the agent is no longer running
-    # The next interaction will restart the agent via Coordinator
-    {:noreply, assign(socket, :agent_id, nil)}
+  @impl true
+  def handle_info({:agent, {:tool_call_identified, tool_info}}, socket) do
+    {:noreply,
+     socket
+     |> AgentLiveHelpers.handle_tool_call_identified(tool_info)
+     |> push_event("scroll-to-bottom", %{})}
+  end
+
+  @impl true
+  def handle_info({:agent, {:tool_execution_started, tool_info}}, socket) do
+    {:noreply,
+     socket
+     |> AgentLiveHelpers.handle_tool_execution_started(tool_info)
+     |> push_event("scroll-to-bottom", %{})}
+  end
+
+  @impl true
+  def handle_info({:agent, {:tool_execution_completed, call_id, tool_result}}, socket) do
+    Logger.debug("Tool execution completed: #{call_id}")
+
+    {:noreply,
+     socket
+     |> AgentLiveHelpers.handle_tool_execution_completed(call_id, tool_result)
+     |> push_event("scroll-to-bottom", %{})}
+  end
+
+  @impl true
+  def handle_info({:agent, {:tool_execution_failed, call_id, error}}, socket) do
+    Logger.debug("Tool execution failed: #{call_id}")
+
+    {:noreply,
+     socket
+     |> AgentLiveHelpers.handle_tool_execution_failed(call_id, error)
+     |> push_event("scroll-to-bottom", %{})}
   end
 
   @impl true
@@ -951,53 +834,6 @@ defmodule AgentsDemoWeb.ChatLive do
     end
   end
 
-  defp generate_id do
-    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
-  end
-
-  # Helper to persist agent state to database
-  defp persist_agent_state(socket, context_label) do
-    if socket.assigns[:conversation_id] && socket.assigns[:agent_id] do
-      try do
-        state_data = AgentServer.export_state(socket.assigns.agent_id)
-
-        case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
-          {:ok, _} ->
-            Logger.info(
-              "Persisted agent state for conversation #{socket.assigns.conversation_id} (#{context_label})"
-            )
-
-            :ok
-
-          {:error, reason} ->
-            Logger.error("Failed to persist agent state (#{context_label}): #{inspect(reason)}")
-            {:error, reason}
-        end
-      rescue
-        error ->
-          Logger.error(
-            "Exception while persisting agent state (#{context_label}): #{inspect(error)}"
-          )
-
-          {:error, error}
-      end
-    else
-      Logger.debug(
-        "Skipping state persistence - no conversation_id or agent_id (#{context_label})"
-      )
-
-      :ok
-    end
-  end
-
-  defp update_streaming_message(socket, deltas) do
-    # Merge deltas into the accumulated streaming_delta
-    current_delta = socket.assigns.streaming_delta
-    updated_delta = MessageDelta.merge_deltas(current_delta, deltas)
-
-    assign(socket, :streaming_delta, updated_delta)
-  end
-
   defp assign_filesystem_files(socket) do
     # Convert to a map of path => %{type: :file, directory: virtual_dir}
     files =
@@ -1039,7 +875,6 @@ defmodule AgentsDemoWeb.ChatLive do
           has_messages={@has_messages}
           input={@input}
           loading={@loading}
-          thread_id={@thread_id}
           is_thread_history_open={@is_thread_history_open}
           streaming_delta={@streaming_delta}
           agent_status={@agent_status}

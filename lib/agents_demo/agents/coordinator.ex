@@ -448,10 +448,8 @@ defmodule AgentsDemo.Agents.Coordinator do
 
     # Use library helper to extract displayable items
     display_items = DisplayHelpers.extract_display_items(message)
-    Logger.debug("Extracted #{length(display_items)} display items from message")
 
     if Enum.empty?(display_items) do
-      Logger.warning("Received Message with no displayable content: #{inspect(message)}")
       {:ok, []}
     else
       result =
@@ -461,6 +459,14 @@ defmodule AgentsDemo.Agents.Coordinator do
             "content_type" => Atom.to_string(item.type),
             "content" => item.content
           }
+
+          # Set status to "pending" for tool calls
+          attrs =
+            if item.type == :tool_call do
+              Map.put(attrs, "status", "pending")
+            else
+              attrs
+            end
 
           Logger.debug(
             "Attempting to save display message: type=#{attrs["content_type"]}, message_type=#{attrs["message_type"]}"

@@ -170,7 +170,11 @@ defmodule AgentsDemo.Agents.Factory do
     ChatAnthropic.new!(%{
       model: @main_model,
       api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
-      stream: true
+      stream: true,
+      thinking: %{
+        type: "enabled",
+        budget_tokens: 3_000
+      }
     })
 
     # OpenAI alternative:

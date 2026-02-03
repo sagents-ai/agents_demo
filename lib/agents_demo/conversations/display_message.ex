@@ -100,6 +100,8 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
     field :content_type, :string
     # Message-local ordering (0-based, resets per message)
     field :sequence, :integer, default: 0
+    # Tool execution status: "pending", "executing", "completed", "failed"
+    field :status, :string, default: "completed"
     field :metadata, :map, default: %{}
 
     timestamps(type: :utc_datetime_usec, updated_at: false)
@@ -108,7 +110,7 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
   @doc false
   def create_changeset(conversation_id, attrs) do
     %DisplayMessage{}
-    |> cast(attrs, [:message_type, :content, :content_type, :sequence, :metadata])
+    |> cast(attrs, [:message_type, :content, :content_type, :sequence, :status, :metadata])
     |> put_change(:conversation_id, conversation_id)
     |> common_validations()
   end
@@ -116,7 +118,7 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
   @doc false
   def changeset(%DisplayMessage{} = message, attrs) do
     message
-    |> cast(attrs, [:message_type, :content, :content_type, :sequence, :metadata])
+    |> cast(attrs, [:message_type, :content, :content_type, :sequence, :status, :metadata])
     |> common_validations()
   end
 
@@ -124,9 +126,14 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
     changeset
     |> validate_required([:conversation_id, :message_type, :content, :content_type])
     |> validate_inclusion(:content_type, @content_types)
+    |> validate_inclusion(:status, ["pending", "executing", "completed", "failed"])
     |> validate_number(:sequence, greater_than_or_equal_to: 0)
     |> validate_content_structure()
     |> foreign_key_constraint(:conversation_id)
+    |> unique_constraint(:conversation_id,
+      name: :unique_tool_call_per_conversation,
+      message: "tool call already exists for this conversation"
+    )
   end
 
   # Validate content structure based on content_type

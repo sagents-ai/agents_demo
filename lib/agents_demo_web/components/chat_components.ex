@@ -319,7 +319,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   def todo_item(assigns) do
     ~H"""
-    <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md">
+    <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md" data-status={@todo.status}>
       <div class={[
         "w-2 h-2 rounded-full flex-shrink-0",
         @todo.status == :pending && "bg-[var(--color-text-tertiary)]",
@@ -339,7 +339,6 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
-  attr :thread_id, :string
   attr :is_thread_history_open, :boolean, default: false
   attr :has_messages, :boolean, default: false
   attr :loading, :boolean, default: false
@@ -371,10 +370,15 @@ defmodule AgentsDemoWeb.ChatComponents do
               class={[
                 "p-2 rounded transition-colors",
                 @debug_mode && "bg-purple-600 text-white hover:bg-purple-700",
-                !@debug_mode && "bg-transparent text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                !@debug_mode &&
+                  "bg-transparent text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
               ]}
               type="button"
-              title={if @debug_mode, do: "Debug Mode: On (Click to disable)", else: "Debug Mode: Off (Click to enable)"}
+              title={
+                if @debug_mode,
+                  do: "Debug Mode: On (Click to disable)",
+                  else: "Debug Mode: Off (Click to enable)"
+              }
             >
               <.icon name="hero-bug-ant" class="w-5 h-5" />
             </button>
@@ -708,7 +712,13 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   # Debug view - technical details (pending action theme - blue tint)
   defp tool_call_debug_view(assigns) do
-    assigns = assign(assigns, :args_json, format_tool_arguments(get_in(assigns.message.content, ["arguments"])))
+    assigns =
+      assign(
+        assigns,
+        :args_json,
+        format_tool_arguments(get_in(assigns.message.content, ["arguments"]))
+      )
+
     assigns = assign(assigns, :is_failed, assigns.message.status == "failed")
     assigns = assign(assigns, :is_executing, assigns.message.status == "executing")
 
@@ -747,7 +757,9 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class="pl-6 text-[var(--color-text-secondary)]">
         <div class="text-xs mb-2">
           <span class="text-gray-600 dark:text-gray-400">Call ID:</span>
-          <span class="ml-2 font-mono text-gray-900 dark:text-gray-100">{get_in(@message.content, ["call_id"])}</span>
+          <span class="ml-2 font-mono text-gray-900 dark:text-gray-100">
+            {get_in(@message.content, ["call_id"])}
+          </span>
         </div>
 
         <%= if @args_json && @args_json != "{}" do %>
@@ -798,7 +810,8 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class={[
         "border rounded-lg p-3",
         @is_error && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
-        !@is_error && "bg-green-50/30 dark:bg-green-950/10 border-green-200/50 dark:border-green-900/30"
+        !@is_error &&
+          "bg-green-50/30 dark:bg-green-950/10 border-green-200/50 dark:border-green-900/30"
       ]}>
         <div class="flex items-center gap-2 mb-2">
           <.icon
@@ -917,17 +930,15 @@ defmodule AgentsDemoWeb.ChatComponents do
                   <% tool.status == :identified -> %>
                     <%!-- Tool identified but not executing yet --%>
                     <.icon name="hero-sparkles" class="w-5 h-5 text-blue-500 animate-pulse" />
-
                   <% tool.status == :executing -> %>
                     <%!-- Tool executing --%>
                     <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-blue-500 animate-spin" />
-
                   <% true -> %>
                     <%!-- Fallback --%>
                     <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-blue-500" />
                 <% end %>
                 <span class="text-sm text-gray-700 dark:text-gray-300">
-                  <%= tool.display_name %>
+                  {tool.display_name}
                 </span>
               </div>
             </div>

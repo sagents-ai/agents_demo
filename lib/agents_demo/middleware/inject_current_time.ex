@@ -53,8 +53,10 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
   @impl true
   def system_prompt(_config) do
     """
+    ## Current Date and Time
+
     User messages include a <current_timestamp> tag showing when the message was sent.
-    Use this to understand temporal context, especially in resumed conversations.
+    Use this to understand temporal context, especially in resumed conversations. Don't refer to the timestamp because the user doesn't see it.
     """
   end
 

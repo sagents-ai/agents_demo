@@ -218,9 +218,9 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           html = render(view)
           assert html =~ "Research project requirements"
           assert html =~ "Design database schema"
-          assert html =~ "in_progress"
-          assert html =~ "completed"
-          assert html =~ "pending"
+          assert html =~ "data-status=\"in_progress\""
+          assert html =~ "data-status=\"completed\""
+          assert html =~ "data-status=\"pending\""
 
           # Verify conversation was created and title was updated
           conversation_id = assigns[:conversation_id]
