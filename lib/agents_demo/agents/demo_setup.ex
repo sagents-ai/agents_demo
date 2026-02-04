@@ -26,7 +26,9 @@ defmodule AgentsDemo.Agents.DemoSetup do
   For new users (directory doesn't exist), copies template files from
   `priv/new_user_template/` to provide helpful starter content.
 
-  Files are stored in `user_files/{user_id}/memories/` at the project root level.
+  Files are stored in:
+  - **Development/Production**: `user_files/{user_id}/memories/` at project root
+  - **Test**: `/tmp/agents_demo_test{partition}/user_files/{user_id}/memories/` (auto-cleaned)
 
   **Production Note**: In production, you might want:
   - Database-backed persistence
@@ -81,11 +83,26 @@ defmodule AgentsDemo.Agents.DemoSetup do
     end
   end
 
+  # Private helper to get storage base path based on environment
+  defp get_storage_base_path do
+    case Mix.env() do
+      :test ->
+        # Use system temp directory for test isolation
+        # Support test partitioning for parallel execution
+        partition = System.get_env("MIX_TEST_PARTITION", "")
+        Path.join([System.tmp_dir!(), "agents_demo_test#{partition}", "user_files"])
+
+      _ ->
+        # Development and production use project root
+        Path.join(File.cwd!(), "user_files")
+    end
+  end
+
   # Private helper to setup user directory and return storage path
   defp setup_user_directory(user_id) do
-    # Use project root level directory (not priv/)
-    project_root = File.cwd!()
-    storage_path = Path.join([project_root, "user_files", to_string(user_id), "memories"])
+    # Use environment-appropriate base path
+    base_path = get_storage_base_path()
+    storage_path = Path.join([base_path, to_string(user_id), "memories"])
 
     # Check if this is a new user (directory doesn't exist)
     is_new_user = not File.exists?(storage_path)

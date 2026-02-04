@@ -104,7 +104,7 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   """
 
-  alias Sagents.{State, AgentServer, AgentSupervisor}
+  alias Sagents.{State, AgentServer, AgentSupervisor, AgentsDynamicSupervisor}
   alias LangChain.Message
   alias Sagents.Message.DisplayHelpers
   require Logger
@@ -546,6 +546,7 @@ defmodule AgentsDemo.Agents.Coordinator do
     ]
 
     supervisor_config = [
+      agent_id: agent_id,
       name: supervisor_name,
       agent: agent,
       initial_state: state,
@@ -558,7 +559,7 @@ defmodule AgentsDemo.Agents.Coordinator do
       save_new_message_fn: &__MODULE__.save_message/2
     ]
 
-    case AgentSupervisor.start_link_sync(supervisor_config) do
+    case AgentsDynamicSupervisor.start_agent_sync(supervisor_config) do
       {:ok, _supervisor_pid} ->
         pid = AgentServer.get_pid(agent_id)
 
@@ -569,8 +570,8 @@ defmodule AgentsDemo.Agents.Coordinator do
            conversation_id: conversation_id
          }}
 
-      {:error, {:already_started, _supervisor_pid}} ->
-        # Race condition - someone else started it
+      {:ok, _supervisor_pid, :already_started} ->
+        # Idempotent - agent already running under supervision
         pid = AgentServer.get_pid(agent_id)
 
         {:ok,
