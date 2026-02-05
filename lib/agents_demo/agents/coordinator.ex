@@ -29,71 +29,65 @@ defmodule AgentsDemo.Agents.Coordinator do
   The agents_demo application demonstrates the correct integration pattern.
   See `agents_demo/lib/agents_demo_web/live/chat_live.ex` for a complete example.
 
-  ### Key Integration Points
+  For streamlined LiveView integration with reusable state management and event handlers,
+  use the AgentLiveHelpers module (generated via `mix sagents.gen.live_helpers`).
 
-  **1. In mount - Initialize filesystem scope:**
+  ### Basic Integration Pattern
 
-      def mount(_params, _session, socket) do
-        user_id = socket.assigns.current_scope.user.id
-        filesystem_scope = {:user, user_id}
+  **1. In mount/3 - Subscribe to agent events:**
 
-        # Optional: Initialize user's filesystem server (if using FileSystemServer)
+      def mount(%{"conversation_id" => conversation_id}, _session, socket) do
+        user_id = socket.assigns.current_user.id
+
         if connected?(socket) do
-          case DemoSetup.ensure_user_filesystem(user_id) do
-            {:ok, _fs_scope} ->
-              FileSystemServer.subscribe(filesystem_scope)
-            {:error, reason} ->
-              Logger.warning("Failed to start user filesystem: \#{inspect(reason)}")
-          end
+          # Subscribe to agent events for real-time updates
+          AgentsDemo.Agents.Coordinator.ensure_subscribed_to_conversation(conversation_id)
         end
 
-        {:ok,
-         socket
-         |> assign(:filesystem_scope, filesystem_scope)
-         # ... other assigns
-        }
+        {:ok, assign(socket, conversation_id: conversation_id)}
       end
 
-  **2. When sending messages - Pass scope explicitly:**
+  **2. When sending messages - Start agent session:**
 
-      def handle_event("send_message", %%{"message" => message_text}, socket) do
+      def handle_event("send_message", %{"message" => message_text}, socket) do
         conversation_id = socket.assigns.conversation_id
-        filesystem_scope = socket.assigns.filesystem_scope
+        user_id = socket.assigns.current_user.id
+        scope = {:user, user_id}
 
         # Start agent session with explicit scope
-        case AgentsDemo.Agents.Coordinator.start_conversation_session(conversation_id,
-               scope: filesystem_scope
-             ) do
+        case AgentsDemo.Agents.Coordinator.start_conversation_session(conversation_id, scope: scope) do
           {:ok, session} ->
             # Create and add message to agent
             message = Message.new_user!(message_text)
             AgentServer.add_message(session.agent_id, message)
+            {:noreply, assign(socket, :loading, true)}
 
           {:error, reason} ->
-            # Handle error...
+            {:noreply, put_flash(socket, :error, "Failed to start agent")}
         end
       end
 
-  **3. When creating new conversations - Scope already known:**
+  **3. Handle agent events:**
 
-      defp create_new_conversation(socket, first_message_text) do
-        scope = socket.assigns.current_scope
-
-        case Conversations.create_conversation(scope, %%{title: title}) do
-          {:ok, conversation} ->
-            # Conversation created - filesystem_scope already in socket assigns
-            # Will be used when start_conversation_session is called
-
-          {:error, changeset} ->
-            # Handle error...
-        end
+      @impl true
+      def handle_info({:agent, {:status_changed, :running, nil}}, socket) do
+        {:noreply, assign(socket, :loading, true)}
       end
 
-  **Key Points:**
-  - Filesystem scope is determined at mount time from user context
-  - Scope is stored in socket assigns and passed explicitly to Coordinator
-  - No database lookups needed to determine scope - it flows from the top down
-  - First-time users work perfectly because scope comes from session, not DB
+      @impl true
+      def handle_info({:agent, {:status_changed, :idle, _data}}, socket) do
+        {:noreply, assign(socket, :loading, false)}
+      end
+
+      @impl true
+      def handle_info({:agent, {:llm_deltas, deltas}}, socket) do
+        # Handle streaming content deltas
+        {:noreply, socket}
+      end
+
+  **Note:** For more sophisticated LiveView integration with reusable state management
+  and event handlers, generate the AgentLiveHelpers module using
+  `mix sagents.gen.live_helpers`.
 
   ## Configuration
 

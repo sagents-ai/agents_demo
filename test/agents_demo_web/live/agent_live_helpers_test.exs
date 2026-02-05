@@ -16,6 +16,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   setup do
     # Copy modules that we'll stub/expect
     Mimic.copy(AgentsDemo.Conversations)
+    Mimic.copy(AgentsDemo.Agents.Coordinator)
     Mimic.copy(Sagents.AgentServer)
     Mimic.copy(Sagents.FileSystemServer)
     :ok
@@ -25,9 +26,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   # SOCKET BUILDER
   # ============================================================================
 
-  defp new_socket(assigns \\ %{}, init_streams \\ []) do
+  defp new_socket(assigns \\ %{}, init_streams \\ [], opts \\ []) do
     # Build a minimal LiveView socket struct
     # We only need enough structure for the helpers to work
+    # Set transport_pid to simulate connected/disconnected state
+    transport_pid = if Keyword.get(opts, :connected, false), do: self(), else: nil
+
     base_socket = %Socket{
       id: "test-socket",
       endpoint: AgentsDemoWeb.Endpoint,
@@ -57,7 +61,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
         live_temp: %{}
       },
       host_uri: %URI{scheme: "http", host: "localhost", port: 4000},
-      transport_pid: nil
+      transport_pid: transport_pid
     }
 
     # Merge custom assigns
@@ -657,7 +661,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   describe "handle_conversation_title_generated/3" do
     test "updates conversation title when agent_id matches" do
       conversation = %{id: 123, title: "Old Title"}
-      socket = new_socket(%{agent_id: "agent-123", conversation: conversation, conversation_id: 123})
+
+      socket =
+        new_socket(%{agent_id: "agent-123", conversation: conversation, conversation_id: 123})
 
       Conversations
       |> expect(:update_conversation, fn conv, attrs ->
@@ -670,7 +676,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       Sagents.AgentServer
       |> stub(:export_state, fn _ -> %{} end)
 
-      result = AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
+      result =
+        AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
 
       assert result.assigns.conversation.title == "New Title"
     end
@@ -682,7 +689,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       Conversations
       |> stub(:update_conversation, fn _, _ -> raise "Should not be called" end)
 
-      result = AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "other-agent")
+      result =
+        AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "other-agent")
 
       assert result.assigns.conversation.title == "Old Title"
     end
@@ -693,19 +701,25 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       Conversations
       |> stub(:update_conversation, fn _, _ -> raise "Should not be called" end)
 
-      result = AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
+      result =
+        AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
 
       refute Map.has_key?(result.assigns, :conversation)
     end
 
     test "updates conversation list when thread history is open" do
       conversation = %{id: 123, title: "Old Title"}
-      socket = new_socket(%{
-        agent_id: "agent-123",
-        conversation: conversation,
-        conversation_id: 123,
-        is_thread_history_open: true
-      }, [:conversation_list])
+
+      socket =
+        new_socket(
+          %{
+            agent_id: "agent-123",
+            conversation: conversation,
+            conversation_id: 123,
+            is_thread_history_open: true
+          },
+          [:conversation_list]
+        )
 
       Conversations
       |> stub(:update_conversation, fn conv, _attrs ->
@@ -716,7 +730,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       Sagents.AgentServer
       |> stub(:export_state, fn _ -> %{} end)
 
-      result = AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
+      result =
+        AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
 
       # Can't easily assert stream contents, but verify socket returned
       assert result.assigns.conversation.title == "New Title"
@@ -931,6 +946,362 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       msg2 = AgentLiveHelpers.create_or_persist_message(socket, :assistant, "Test 2")
 
       assert msg1.id != msg2.id
+    end
+  end
+
+  # ============================================================================
+  # STATE MANAGEMENT HELPER TESTS
+  # ============================================================================
+
+  describe "init_agent_state/1" do
+    test "sets all agent assigns to default values" do
+      socket = new_socket()
+
+      result = AgentLiveHelpers.init_agent_state(socket)
+
+      assert result.assigns.conversation == nil
+      assert result.assigns.conversation_id == nil
+      assert result.assigns.agent_id == nil
+      assert result.assigns.agent_status == :not_running
+      assert result.assigns.todos == []
+      assert result.assigns.has_messages == false
+      assert result.assigns.streaming_delta == nil
+      assert result.assigns.loading == false
+      assert result.assigns.pending_tools == []
+      assert result.assigns.interrupt_data == nil
+    end
+
+    test "initializes messages stream to empty" do
+      socket = new_socket()
+
+      result = AgentLiveHelpers.init_agent_state(socket)
+
+      # Verify stream exists (it's in socket.assigns.streams)
+      assert Map.has_key?(result.assigns, :streams)
+      assert Map.has_key?(result.assigns.streams, :messages)
+    end
+
+    test "preserves other non-agent assigns" do
+      socket = new_socket(%{custom_value: 123, input: "test"})
+
+      result = AgentLiveHelpers.init_agent_state(socket)
+
+      # Agent assigns are reset
+      assert result.assigns.agent_status == :not_running
+
+      # Custom assigns preserved
+      assert result.assigns.custom_value == 123
+      assert result.assigns.input == "test"
+    end
+  end
+
+  describe "reset_conversation/1" do
+    test "resets all agent assigns to defaults" do
+      socket =
+        new_socket(%{
+          conversation_id: "conv-123",
+          agent_id: "agent-123",
+          agent_status: :running,
+          todos: [%{content: "Test"}],
+          loading: true
+        })
+
+      result = AgentLiveHelpers.reset_conversation(socket)
+
+      # All agent assigns should be reset
+      assert result.assigns.conversation == nil
+      assert result.assigns.conversation_id == nil
+      assert result.assigns.agent_id == nil
+      assert result.assigns.agent_status == :not_running
+      assert result.assigns.todos == []
+      assert result.assigns.loading == false
+    end
+
+    test "unsubscribes from conversation when connected" do
+      socket = new_socket(%{conversation_id: "conv-123"}, [], connected: true)
+
+      AgentsDemo.Agents.Coordinator
+      |> expect(:unsubscribe_from_conversation, fn conv_id ->
+        assert conv_id == "conv-123"
+        :ok
+      end)
+
+      result = AgentLiveHelpers.reset_conversation(socket)
+
+      # Should reset assigns after unsubscribing
+      assert result.assigns.conversation_id == nil
+    end
+
+    test "does not unsubscribe when not connected" do
+      socket = new_socket(%{conversation_id: "conv-123"})
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:unsubscribe_from_conversation, fn _ -> raise "Should not be called" end)
+
+      result = AgentLiveHelpers.reset_conversation(socket)
+
+      # Should still reset assigns
+      assert result.assigns.conversation_id == nil
+    end
+
+    test "does not unsubscribe when no conversation_id" do
+      socket = new_socket([], [], connected: true)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:unsubscribe_from_conversation, fn _ -> raise "Should not be called" end)
+
+      result = AgentLiveHelpers.reset_conversation(socket)
+
+      # Should reset to defaults
+      assert result.assigns.conversation_id == nil
+      assert result.assigns.agent_status == :not_running
+    end
+  end
+
+  describe "load_conversation/3" do
+    setup do
+      Mimic.copy(AgentsDemo.Agents.Coordinator)
+      :ok
+    end
+
+    test "returns {:ok, socket} when conversation exists" do
+      socket = new_socket([], [], connected: true)
+      scope = {:user, 1}
+      conversation = %{id: 123, title: "Test Conversation"}
+
+      Conversations
+      |> stub(:get_conversation!, fn _scope, _id -> conversation end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
+      |> stub(:track_conversation_viewer, fn _, _, _ -> {:ok, :ref} end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      {:ok, result} =
+        AgentLiveHelpers.load_conversation(socket, 123,
+          scope: scope,
+          user_id: 1
+        )
+
+      assert result.assigns.conversation == conversation
+      assert result.assigns.conversation_id == 123
+      assert result.assigns.agent_id == "agent-123"
+      assert result.assigns.agent_status == :not_running
+    end
+
+    test "returns {:error, socket} with flash when conversation not found" do
+      socket = new_socket()
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ ->
+        raise Ecto.NoResultsError, queryable: "conversations"
+      end)
+
+      {:error, result} =
+        AgentLiveHelpers.load_conversation(socket, 999, scope: scope)
+
+      # Should return error tuple and have flash error set
+      # Flash is stored in assigns.flash in our test socket (string keys)
+      assert result.assigns.flash["error"] == "Conversation not found"
+    end
+
+    test "loads display messages and todos from database" do
+      socket = new_socket()
+      scope = {:user, 1}
+      conversation = %{id: 123, title: "Test"}
+
+      display_messages = [%{id: 1, content: "Msg 1"}, %{id: 2, content: "Msg 2"}]
+      todos = [%{content: "Todo 1", status: :pending}]
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> conversation end)
+      |> expect(:load_display_messages, fn conv_id ->
+        assert conv_id == 123
+        display_messages
+      end)
+      |> expect(:load_todos, fn conv_id ->
+        assert conv_id == 123
+        todos
+      end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      {:ok, result} =
+        AgentLiveHelpers.load_conversation(socket, 123, scope: scope)
+
+      assert result.assigns.todos == todos
+      assert result.assigns.has_messages == true
+    end
+
+    test "gets agent status from AgentServer" do
+      socket = new_socket()
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+
+      Sagents.AgentServer
+      |> expect(:get_status, fn agent_id ->
+        assert agent_id == "agent-123"
+        :idle
+      end)
+
+      {:ok, result} =
+        AgentLiveHelpers.load_conversation(socket, 123, scope: scope)
+
+      # Status should be directly assigned (no conversion)
+      assert result.assigns.agent_status == :idle
+    end
+
+    test "subscribes to conversation when connected" do
+      socket = new_socket([], [], connected: true)
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+      |> expect(:ensure_subscribed_to_conversation, fn conv_id ->
+        assert conv_id == 123
+        :ok
+      end)
+      |> expect(:track_conversation_viewer, fn conv_id, user_id, pid ->
+        assert conv_id == 123
+        assert user_id == 1
+        assert pid == self()
+        {:ok, :ref}
+      end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      {:ok, _result} =
+        AgentLiveHelpers.load_conversation(socket, 123,
+          scope: scope,
+          user_id: 1
+        )
+    end
+
+    test "does not subscribe when not connected" do
+      socket = new_socket()
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+      |> stub(:ensure_subscribed_to_conversation, fn _ -> raise "Should not be called" end)
+      |> stub(:track_conversation_viewer, fn _, _, _ -> raise "Should not be called" end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      {:ok, _result} =
+        AgentLiveHelpers.load_conversation(socket, 123, scope: scope)
+    end
+
+    test "unsubscribes from previous conversation when switching" do
+      socket = new_socket(%{conversation_id: 100}, [], connected: true)
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "New"} end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+      |> expect(:unsubscribe_from_conversation, fn conv_id ->
+        assert conv_id == 100
+        :ok
+      end)
+      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      {:ok, result} =
+        AgentLiveHelpers.load_conversation(socket, 123,
+          scope: scope,
+          user_id: 1
+        )
+
+      # Should have new conversation loaded
+      assert result.assigns.conversation_id == 123
+    end
+
+    test "does not unsubscribe when loading same conversation" do
+      socket = new_socket(%{conversation_id: 123}, [], connected: true)
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Same"} end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+      |> stub(:unsubscribe_from_conversation, fn _ -> raise "Should not be called" end)
+      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      {:ok, _result} =
+        AgentLiveHelpers.load_conversation(socket, 123,
+          scope: scope,
+          user_id: 1
+        )
+    end
+
+    test "handles already tracked presence gracefully" do
+      socket = new_socket([], [], connected: true)
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _ -> [] end)
+      |> stub(:load_todos, fn _ -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
+      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
+      |> stub(:track_conversation_viewer, fn _, _, _ ->
+        {:error, {:already_tracked, :ref, :meta, :data}}
+      end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _ -> :not_running end)
+
+      # Should not raise
+      {:ok, result} =
+        AgentLiveHelpers.load_conversation(socket, 123,
+          scope: scope,
+          user_id: 1
+        )
+
+      assert result.assigns.conversation_id == 123
     end
   end
 end

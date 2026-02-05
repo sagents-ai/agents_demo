@@ -1,14 +1,58 @@
 defmodule AgentsDemoWeb.AgentLiveHelpers do
   @moduledoc """
-  Reusable helpers for agent event handling in LiveView.
+  Reusable helpers for agent event handling and state management in LiveView.
 
-  This module extracts common patterns from ChatLive to reduce boilerplate
-  when integrating AI agents into Phoenix LiveView applications. All functions
-  take a socket and return an updated socket, following the LiveView pattern.
+  This module provides two main categories of helpers:
 
-  ## Usage
+  ## 1. State Management Helpers
 
-  In your LiveView handlers, delegate to these helpers:
+  Helpers that manage agent-related socket assigns, reducing boilerplate in mount/3
+  and handle_params/3:
+
+  - `init_agent_state/1` - Initialize all agent assigns to defaults
+  - `load_conversation/3` - Load conversation and set up complete agent state
+  - `reset_conversation/1` - Reset all agent state to defaults
+
+  ## 2. Event Handlers
+
+  Helpers for handling agent PubSub events in handle_info/2:
+
+  - Status change handlers (running, idle, cancelled, interrupted, error)
+  - Message handlers (LLM deltas, message complete, display messages)
+  - Tool execution handlers (identified, started, completed, failed)
+  - Lifecycle handlers (title generated, agent shutdown)
+
+  ## Usage Example
+
+  ### In mount/3
+
+      @impl true
+      def mount(_params, _session, socket) do
+        {:ok,
+         socket
+         |> AgentLiveHelpers.init_agent_state()
+         |> assign(:input, "")
+         |> assign(:sidebar_collapsed, false)
+         # ... other app-specific assigns
+        }
+      end
+
+  ### In handle_params/3
+
+      @impl true
+      def handle_params(%{"conversation_id" => id}, _uri, socket) do
+        case AgentLiveHelpers.load_conversation(
+          socket,
+          id,
+          scope: socket.assigns.current_scope,
+          user_id: socket.assigns.current_scope.user.id
+        ) do
+          {:ok, socket} -> {:noreply, socket}
+          {:error, socket} -> {:noreply, push_navigate(socket, to: ~p"/chat")}
+        end
+      end
+
+  ### In handle_info/2
 
       @impl true
       def handle_info({:agent, {:status_changed, :running, nil}}, socket) do
@@ -19,20 +63,249 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
   This module was generated for your application and has hardcoded references to:
   - `AgentsDemo.Conversations` - Database context
+  - `AgentsDemo.Agents.Coordinator` - Agent coordination
   - `Sagents.AgentServer` - Agent server module
 
   You can customize message formatting, error handling, and logging by editing
   the generated functions directly.
   """
 
-  import Phoenix.LiveView, only: [stream: 4, stream_insert: 3]
+  import Phoenix.LiveView, only: [stream: 4, stream_insert: 3, put_flash: 3, connected?: 1]
   import Phoenix.Component, only: [assign: 3]
 
   alias AgentsDemo.Conversations
+  alias AgentsDemo.Agents.Coordinator
   alias Sagents.AgentServer
   alias LangChain.MessageDelta
 
   require Logger
+
+  # === STATE MANAGEMENT HELPERS ===
+
+  @doc """
+  Initialize all agent-related assigns to their default empty state.
+
+  This should be called in `mount/3` to set up all agent-related assigns
+  with proper defaults. It initializes both core agent state (conversation,
+  agent_id, status) and streaming state (deltas, pending tools).
+
+  ## Returns
+
+  Updated socket with all agent assigns initialized to defaults.
+
+  ## Example
+
+      def mount(_params, _session, socket) do
+        {:ok,
+         socket
+         |> AgentLiveHelpers.init_agent_state()
+         |> assign(:input, "")
+         |> assign(:sidebar_collapsed, false)
+         # ... other app-specific assigns
+        }
+      end
+
+  ## Assigns Set
+
+  - `:conversation` - nil
+  - `:conversation_id` - nil
+  - `:agent_id` - nil
+  - `:agent_status` - :not_running
+  - `:todos` - []
+  - `:has_messages` - false
+  - `:streaming_delta` - nil
+  - `:loading` - false
+  - `:pending_tools` - []
+  - `:interrupt_data` - nil
+  - `:messages` stream - empty (reset: true)
+  """
+  def init_agent_state(socket) do
+    socket
+    |> assign(:conversation, nil)
+    |> assign(:conversation_id, nil)
+    |> assign(:agent_id, nil)
+    |> assign(:agent_status, :not_running)
+    |> assign(:todos, [])
+    |> assign(:has_messages, false)
+    |> assign(:streaming_delta, nil)
+    |> assign(:loading, false)
+    |> assign(:pending_tools, [])
+    |> assign(:interrupt_data, nil)
+    |> stream(:messages, [], reset: true)
+  end
+
+  @doc """
+  Load a conversation from the database and set up all agent-related state.
+
+  Handles the complete workflow for loading a conversation:
+  1. Unsubscribes from previous conversation (if switching)
+  2. Loads conversation from database
+  3. Computes agent_id from conversation_id
+  4. Subscribes to agent PubSub events (if connected)
+  5. Tracks user presence (if connected and user_id provided)
+  6. Loads display messages and todos from database
+  7. Checks if agent is running and gets its status
+  8. Updates socket assigns with all loaded data
+
+  ## Parameters
+
+  - `socket` - The LiveView socket
+  - `conversation_id` - ID of the conversation to load
+  - `opts` - Keyword list of options:
+    - `:scope` (required) - User scope for database queries (e.g., `{:user, 1}`)
+    - `:user_id` (optional) - User ID for presence tracking
+    - `:conversations_module` (optional) - Module to use for DB operations (default: Conversations)
+
+  ## Returns
+
+  - `{:ok, socket}` - Socket with conversation loaded and all agent state set
+  - `{:error, socket}` - Socket with flash error (when conversation not found)
+
+  ## Example
+
+      def handle_params(%{"conversation_id" => conversation_id}, _uri, socket) do
+        case AgentLiveHelpers.load_conversation(
+          socket,
+          conversation_id,
+          scope: socket.assigns.current_scope,
+          user_id: socket.assigns.current_scope.user.id
+        ) do
+          {:ok, socket} ->
+            # Conversation loaded successfully
+            {:noreply, socket}
+
+          {:error, socket} ->
+            # Conversation not found - navigate to fresh state
+            {:noreply, push_navigate(socket, to: ~p"/chat")}
+        end
+      end
+
+  ## Notes
+
+  - Does NOT navigate on error - calling code handles navigation
+  - Does NOT set page_title - that's application-specific
+  - Conversation is available in assigns for building page title
+  """
+  def load_conversation(socket, conversation_id, opts) do
+    scope = Keyword.fetch!(opts, :scope)
+    user_id = Keyword.get(opts, :user_id)
+    conversations = Keyword.get(opts, :conversations_module, Conversations)
+
+    try do
+      # Unsubscribe from previous conversation if switching
+      socket = maybe_unsubscribe_previous(socket, conversation_id)
+
+      # Load conversation from database
+      conversation = conversations.get_conversation!(scope, conversation_id)
+      agent_id = Coordinator.conversation_agent_id(conversation_id)
+
+      # Subscribe to agent events and track presence
+      socket = maybe_subscribe_and_track(socket, conversation_id, user_id)
+
+      # Load display messages and todos
+      display_messages = conversations.load_display_messages(conversation_id)
+      has_messages = !Enum.empty?(display_messages)
+      saved_todos = conversations.load_todos(conversation_id)
+
+      # Check if agent is already running
+      agent_status = AgentServer.get_status(agent_id)
+
+      # Update socket with all loaded data
+      socket =
+        socket
+        |> assign(:conversation, conversation)
+        |> assign(:conversation_id, conversation_id)
+        |> assign(:agent_id, agent_id)
+        |> assign(:todos, saved_todos)
+        |> assign(:agent_status, agent_status)
+        |> stream(:messages, display_messages, reset: true)
+        |> assign(:has_messages, has_messages)
+
+      {:ok, socket}
+    rescue
+      Ecto.NoResultsError ->
+        socket =
+          socket
+          |> put_flash(:error, "Conversation not found")
+
+        {:error, socket}
+    end
+  end
+
+  @doc """
+  Reset all agent-related state to default values and clean up subscriptions.
+
+  Calls `init_agent_state/1` internally to reset all assigns to defaults,
+  and unsubscribes from the current conversation if connected.
+
+  ## Parameters
+
+  - `socket` - The LiveView socket
+
+  ## Returns
+
+  Updated socket with all agent state reset to defaults.
+
+  ## Example
+
+      def handle_event("new_thread", _params, socket) do
+        socket =
+          socket
+          |> AgentLiveHelpers.reset_conversation()
+          |> push_patch(to: ~p"/chat")
+
+        {:noreply, socket}
+      end
+
+  ## Notes
+
+  - Does NOT set page_title - that's application-specific
+  - Presence tracking is automatically cleaned up on process termination
+  """
+  def reset_conversation(socket) do
+    # Unsubscribe from current conversation if connected
+    if connected?(socket) && socket.assigns[:conversation_id] do
+      :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
+      Logger.debug("Unsubscribed from conversation #{socket.assigns.conversation_id}")
+    end
+
+    # Reset all agent assigns to defaults
+    init_agent_state(socket)
+  end
+
+  # === PRIVATE HELPERS FOR STATE MANAGEMENT ===
+
+  defp maybe_unsubscribe_previous(socket, conversation_id) do
+    if connected?(socket) && socket.assigns[:conversation_id] &&
+         socket.assigns.conversation_id != conversation_id do
+      :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
+      Logger.debug("Unsubscribed from previous conversation #{socket.assigns.conversation_id}")
+    end
+
+    socket
+  end
+
+  defp maybe_subscribe_and_track(socket, conversation_id, user_id) do
+    if connected?(socket) do
+      :ok = Coordinator.ensure_subscribed_to_conversation(conversation_id)
+
+      if user_id do
+        case Coordinator.track_conversation_viewer(conversation_id, user_id, self()) do
+          {:ok, _ref} ->
+            :ok
+
+          {:error, {:already_tracked, _, _, _}} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("Failed to track presence: #{inspect(reason)}")
+            :ok
+        end
+      end
+    end
+
+    socket
+  end
 
   # === STATUS CHANGE HANDLERS ===
 
@@ -240,7 +513,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
     # Update streaming delta
     current_delta = socket.assigns[:streaming_delta]
-    updated_delta = update_tool_status_in_delta(current_delta, tool_info, display_name, :executing)
+
+    updated_delta =
+      update_tool_status_in_delta(current_delta, tool_info, display_name, :executing)
 
     assign(socket, :streaming_delta, updated_delta)
   end
@@ -378,7 +653,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
           socket
       end
     else
-      Logger.debug("Skipping state persistence - no conversation_id or agent_id (#{context_label})")
       socket
     end
   end
@@ -529,7 +803,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
           updated_tool_calls ++ [display_info]
         end
 
-      updated_metadata = Map.put(current_delta.metadata || %{}, :streaming_tool_calls, updated_tool_calls)
+      updated_metadata =
+        Map.put(current_delta.metadata || %{}, :streaming_tool_calls, updated_tool_calls)
+
       %{current_delta | metadata: updated_metadata}
     else
       display_info = %{
@@ -557,7 +833,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
           end
         end)
 
-      updated_metadata = Map.put(current_delta.metadata || %{}, :streaming_tool_calls, updated_tool_calls)
+      updated_metadata =
+        Map.put(current_delta.metadata || %{}, :streaming_tool_calls, updated_tool_calls)
+
       %{current_delta | metadata: updated_metadata}
     else
       display_info = %{
@@ -571,5 +849,4 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
       LangChain.MessageDelta.add_tool_display_info(current_delta, display_info)
     end
   end
-
 end

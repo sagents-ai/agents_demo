@@ -54,16 +54,14 @@ defmodule AgentsDemoWeb.ChatLive do
     # For new conversations, agent_id will be set when conversation is created
     {:ok,
      socket
-     |> stream(:messages, [])
+     # Initialize all agent-related state with helper
+     |> AgentLiveHelpers.init_agent_state()
+     # Initialize conversation list stream (app-specific UI state)
      |> stream(:conversation_list, [])
+     # Application-specific assigns
      |> assign(:input, "")
-     |> assign(:loading, false)
-     |> assign(:conversation, nil)
-     |> assign(:conversation_id, nil)
-     |> assign(:agent_id, nil)
      |> assign(:filesystem_scope, filesystem_scope)
      |> assign(:timezone, timezone)
-     |> assign(:todos, [])
      |> assign_filesystem_files()
      |> assign(:sidebar_collapsed, false)
      |> assign(:sidebar_active_tab, "tasks")
@@ -73,11 +71,6 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:selected_file_content, nil)
      |> assign(:file_view_mode, :rendered)
      |> assign(:is_thread_history_open, false)
-     |> assign(:has_messages, false)
-     |> assign(:streaming_delta, nil)
-     |> assign(:agent_status, nil)
-     |> assign(:pending_tools, [])
-     |> assign(:interrupt_data, nil)
      |> assign(:conversations_loaded, 0)
      |> assign(:has_more_conversations, true)
      |> assign(:has_conversations, false)
@@ -218,29 +211,17 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("new_thread", _params, socket) do
     previous_conversation_id = socket.assigns[:conversation_id]
 
-    # Unsubscribe and untrack presence from current conversation if any
-    if previous_conversation_id do
-      :ok = Coordinator.unsubscribe_from_conversation(previous_conversation_id)
-
-      # Untrack presence BEFORE modifying socket assigns so AgentServer
-      # sees viewer count drop to 0 and can trigger smart shutdown
-      if connected?(socket) do
-        user_id = socket.assigns.current_scope.user.id
-        Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
-      end
+    # Untrack presence BEFORE resetting state so AgentServer
+    # sees viewer count drop to 0 and can trigger smart shutdown
+    if previous_conversation_id && connected?(socket) do
+      user_id = socket.assigns.current_scope.user.id
+      Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
     end
 
     socket =
       socket
-      |> assign(:conversation, nil)
-      |> assign(:conversation_id, nil)
-      |> assign(:agent_id, nil)
+      |> AgentLiveHelpers.reset_conversation()
       |> assign(:page_title, "Agents Demo")
-      |> assign(:agent_status, :idle)
-      |> assign(:loading, false)
-      |> assign(:todos, [])
-      |> stream(:messages, [], reset: true)
-      |> assign(:has_messages, false)
       |> assign(:selected_sub_agent, nil)
       |> reset_conversation_in_stream(previous_conversation_id)
 
@@ -677,115 +658,50 @@ defmodule AgentsDemoWeb.ChatLive do
     :ok
   end
 
-  # Load conversation from database
+  # Load conversation from database using helper
   defp load_conversation(socket, conversation_id) do
     scope = socket.assigns.current_scope
+    user_id = socket.assigns.current_scope.user.id
 
-    # Unsubscribe from previous conversation if switching conversations
-    if connected?(socket) && socket.assigns[:conversation_id] &&
-         socket.assigns.conversation_id != conversation_id do
-      :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
-      Logger.debug("Unsubscribed from previous conversation #{socket.assigns.conversation_id}")
+    case AgentLiveHelpers.load_conversation(socket, conversation_id,
+           scope: scope,
+           user_id: user_id
+         ) do
+      {:ok, socket} ->
+        # Build page title from conversation title (application-specific)
+        page_title = build_page_title(socket.assigns.conversation)
+
+        socket
+        |> assign(:page_title, page_title)
+        |> push_event("scroll-to-bottom", %{})
+
+      {:error, socket} ->
+        # Conversation not found - navigate to fresh state
+        push_navigate(socket, to: ~p"/chat")
     end
-
-    conversation = Conversations.get_conversation!(scope, conversation_id)
-    agent_id = Coordinator.conversation_agent_id(conversation_id)
-
-    # Subscribe to agent events (works even if agent not running!)
-    # Using ensure_* versions - idempotent, safe if user clicks same conversation multiple times
-    if connected?(socket) do
-      :ok = Coordinator.ensure_subscribed_to_conversation(conversation_id)
-      Logger.debug("Ensured subscription to agent events for conversation #{conversation_id}")
-
-      # Track presence - this enables smart agent shutdown
-      user_id = socket.assigns.current_scope.user.id
-
-      case Coordinator.track_conversation_viewer(conversation_id, user_id, self()) do
-        {:ok, _ref} ->
-          Logger.debug("Tracking presence for conversation #{conversation_id}, user #{user_id}")
-
-        {:error, {:already_tracked, _, _, _}} ->
-          Logger.debug(
-            "Already tracking presence for conversation #{conversation_id}, user #{user_id}"
-          )
-
-        {:error, reason} ->
-          Logger.warning("Failed to track presence: #{inspect(reason)}")
-      end
-    end
-
-    # Load display messages for UI (no agent needed)
-    display_messages = Conversations.load_display_messages(conversation_id)
-    has_messages = !Enum.empty?(display_messages)
-
-    # Load saved TODOs from database (no agent needed)
-    # This shows historical TODOs immediately without starting the agent
-    saved_todos = Conversations.load_todos(conversation_id)
-
-    # Build page title from conversation title
-    page_title =
-      if conversation.title && conversation.title != "" do
-        # Truncate long titles for page title
-        truncated_title = String.slice(conversation.title, 0, 60)
-
-        if String.length(conversation.title) > 60 do
-          "#{truncated_title}... - Agents Demo"
-        else
-          "#{truncated_title} - Agents Demo"
-        end
-      else
-        "Conversation - Agents Demo"
-      end
-
-    # Check if agent is already running and get its current status
-    agent_status =
-      case AgentServer.get_status(agent_id) do
-        :not_running ->
-          Logger.debug("Agent #{agent_id} is not running")
-          nil
-
-        status ->
-          Logger.debug("Agent #{agent_id} is already running with status: #{status}")
-          status
-      end
-
-    socket
-    |> assign(:conversation, conversation)
-    |> assign(:conversation_id, conversation_id)
-    |> assign(:agent_id, agent_id)
-    |> assign(:page_title, page_title)
-    |> assign(:todos, saved_todos)
-    |> assign(:agent_status, agent_status)
-    |> stream(:messages, display_messages, reset: true)
-    |> assign(:has_messages, has_messages)
-    # Scroll to bottom when loading conversation
-    |> push_event("scroll-to-bottom", %{})
-  rescue
-    Ecto.NoResultsError ->
-      socket
-      |> put_flash(:error, "Conversation not found")
-      |> push_navigate(to: ~p"/chat")
   end
 
-  # Reset to fresh conversation state
-  defp reset_conversation_state(socket) do
-    # Unsubscribe from current conversation if any
-    if socket.assigns[:conversation_id] do
-      :ok = Coordinator.unsubscribe_from_conversation(socket.assigns.conversation_id)
+  # Build page title from conversation (application-specific formatting)
+  defp build_page_title(conversation) do
+    if conversation.title && conversation.title != "" do
+      # Truncate long titles for page title
+      truncated_title = String.slice(conversation.title, 0, 60)
+
+      if String.length(conversation.title) > 60 do
+        "#{truncated_title}... - Agents Demo"
+      else
+        "#{truncated_title} - Agents Demo"
+      end
+    else
+      "Conversation - Agents Demo"
     end
+  end
 
-    # Note: Presence tracking is automatically cleaned up when the LiveView process
-    # terminates - no manual cleanup needed
-
+  # Reset to fresh conversation state using helper
+  defp reset_conversation_state(socket) do
     socket
-    |> assign(:conversation, nil)
-    |> assign(:conversation_id, nil)
-    |> assign(:agent_id, nil)
+    |> AgentLiveHelpers.reset_conversation()
     |> assign(:page_title, "Agents Demo")
-    |> assign(:todos, [])
-    |> assign(:agent_status, nil)
-    |> stream(:messages, [], reset: true)
-    |> assign(:has_messages, false)
   end
 
   # Update conversation selection in the stream to reflect active state

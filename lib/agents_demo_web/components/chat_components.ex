@@ -319,7 +319,10 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   def todo_item(assigns) do
     ~H"""
-    <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md" data-status={@todo.status}>
+    <div
+      class="flex items-center gap-2 px-3 py-2 bg-[var(--color-background)] border border-[var(--color-border)] rounded-md"
+      data-status={@todo.status}
+    >
       <div class={[
         "w-2 h-2 rounded-full flex-shrink-0",
         @todo.status == :pending && "bg-[var(--color-text-tertiary)]",
@@ -363,14 +366,13 @@ defmodule AgentsDemoWeb.ChatComponents do
           <h1 class="text-2xl font-semibold m-0">Agents Demo</h1>
 
           <button
-            :if={@conversation_id && is_nil(@agent_status)}
+            :if={@conversation_id && @agent_status == :not_running}
             phx-click="wake_agent"
             class="ml-3 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors text-sm font-medium flex items-center gap-1.5"
             type="button"
             title="Activate agent for debugging - loads agent state into memory without executing"
           >
-            <.icon name="hero-bolt" class="w-4 h-4" />
-            Wake
+            <.icon name="hero-bolt" class="w-4 h-4" /> Wake
           </button>
         </div>
 
