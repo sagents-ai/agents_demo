@@ -309,14 +309,6 @@ supervisor_opts = [
 ]
 ```
 
-## Learn more
-
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
-
 ## Web search tool
 
 The web search tool demonstrates both how to perform a web search tool using your own hardware instead of a service and how to create a custom middleware.
