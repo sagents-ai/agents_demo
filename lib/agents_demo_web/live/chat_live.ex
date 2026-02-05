@@ -75,7 +75,7 @@ defmodule AgentsDemoWeb.ChatLive do
      |> assign(:is_thread_history_open, false)
      |> assign(:has_messages, false)
      |> assign(:streaming_delta, nil)
-     |> assign(:agent_status, :idle)
+     |> assign(:agent_status, nil)
      |> assign(:pending_tools, [])
      |> assign(:interrupt_data, nil)
      |> assign(:conversations_loaded, 0)
@@ -477,6 +477,31 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
+  def handle_event("wake_agent", _params, socket) do
+    conversation_id = socket.assigns.conversation_id
+    filesystem_scope = socket.assigns.filesystem_scope
+    timezone = socket.assigns.timezone
+
+    Logger.info("Waking agent for conversation #{conversation_id} (debug mode)")
+
+    # Start or ensure agent session is running (idempotent operation)
+    # This loads the saved agent state into memory without executing
+    # Once started, the agent will broadcast status changes and the button will disappear
+    case Coordinator.start_conversation_session(conversation_id,
+           scope: filesystem_scope,
+           timezone: timezone
+         ) do
+      {:ok, session} ->
+        Logger.info("Agent woken successfully: #{session.agent_id}")
+        {:noreply, put_flash(socket, :info, "Agent activated and ready for debugging")}
+
+      {:error, reason} ->
+        Logger.error("Failed to wake agent: #{inspect(reason)}")
+        {:noreply, put_flash(socket, :error, "Failed to activate agent: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
   def handle_info({:agent, {:status_changed, :running, nil}}, socket) do
     Logger.info("Agent is running")
     {:noreply, AgentLiveHelpers.handle_status_running(socket)}
@@ -712,12 +737,25 @@ defmodule AgentsDemoWeb.ChatLive do
         "Conversation - Agents Demo"
       end
 
+    # Check if agent is already running and get its current status
+    agent_status =
+      case AgentServer.get_status(agent_id) do
+        :not_running ->
+          Logger.debug("Agent #{agent_id} is not running")
+          nil
+
+        status ->
+          Logger.debug("Agent #{agent_id} is already running with status: #{status}")
+          status
+      end
+
     socket
     |> assign(:conversation, conversation)
     |> assign(:conversation_id, conversation_id)
     |> assign(:agent_id, agent_id)
     |> assign(:page_title, page_title)
     |> assign(:todos, saved_todos)
+    |> assign(:agent_status, agent_status)
     |> stream(:messages, display_messages, reset: true)
     |> assign(:has_messages, has_messages)
     # Scroll to bottom when loading conversation
@@ -745,6 +783,7 @@ defmodule AgentsDemoWeb.ChatLive do
     |> assign(:agent_id, nil)
     |> assign(:page_title, "Agents Demo")
     |> assign(:todos, [])
+    |> assign(:agent_status, nil)
     |> stream(:messages, [], reset: true)
     |> assign(:has_messages, false)
   end
@@ -894,6 +933,8 @@ defmodule AgentsDemoWeb.ChatLive do
           view_mode={@file_view_mode}
         />
       <% end %>
+
+      <Layouts.flash_group flash={@flash} />
     </div>
     """
   end

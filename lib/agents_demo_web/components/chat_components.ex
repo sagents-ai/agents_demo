@@ -345,7 +345,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :streaming_delta, :any
   attr :streams, :any
   attr :input, :string, doc: "The user input being drafted for a new message"
-  attr :agent_status, :atom, default: :idle
+  attr :agent_status, :atom, default: nil
   attr :pending_tools, :list, default: []
   attr :current_scope, :any, default: nil
   attr :conversation_id, :string, default: nil
@@ -361,6 +361,17 @@ defmodule AgentsDemoWeb.ChatComponents do
         <div class="flex items-center gap-3">
           <.icon name="hero-chat-bubble-left-right" class="w-7 h-7 text-[var(--color-primary)]" />
           <h1 class="text-2xl font-semibold m-0">Agents Demo</h1>
+
+          <button
+            :if={@conversation_id && is_nil(@agent_status)}
+            phx-click="wake_agent"
+            class="ml-3 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors text-sm font-medium flex items-center gap-1.5"
+            type="button"
+            title="Activate agent for debugging - loads agent state into memory without executing"
+          >
+            <.icon name="hero-bolt" class="w-4 h-4" />
+            Wake
+          </button>
         </div>
 
         <div class="flex items-center gap-4">
