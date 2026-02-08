@@ -474,7 +474,7 @@ defmodule AgentsDemoWeb.ChatComponents do
                 phx-update="stream"
                 class="flex flex-col gap-4"
               >
-                <div :for={{id, message} <- @streams.messages} id={id}>
+                <div :for={{id, message} <- @streams.messages} id={id} class="hidden has-[>*]:block">
                   <.message message={message} debug_mode={@debug_mode} />
                 </div>
               </div>
@@ -550,7 +550,6 @@ defmodule AgentsDemoWeb.ChatComponents do
     <%= case @message.content_type do %>
       <% "thinking" -> %>
         <.thinking_display
-          class="ml-14"
           message_id={@message.id}
           content_text={get_in(@message.content, ["text"]) || ""}
         />
@@ -577,36 +576,17 @@ defmodule AgentsDemoWeb.ChatComponents do
   # Component: Text Message (normal message display)
   defp text_message(assigns) do
     ~H"""
-    <div class="flex gap-4 max-w-full">
+    <%= if @content_text && @content_text != "" do %>
       <div class={[
-        "w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0",
-        @message.message_type == "user" && "bg-[var(--color-user-message)] text-white",
-        @message.message_type == "assistant" &&
-          "bg-[var(--color-avatar-bg)] text-[var(--color-primary)]",
-        @message.message_type == "tool" &&
-          "bg-[var(--color-border)] text-[var(--color-text-secondary)]"
+        "px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
+        @message.message_type == "user" &&
+          "bg-[var(--color-user-message)] text-white",
+        @message.message_type == "assistant" && "bg-[var(--color-surface)]",
+        @message.message_type == "tool" && "bg-[var(--color-background)]"
       ]}>
-        <%= if @message.message_type == "user" do %>
-          <.icon name="hero-user" class="w-5 h-5" />
-        <% else %>
-          <.icon name="hero-cpu-chip" class="w-5 h-5" />
-        <% end %>
+        <.markdown text={@content_text} invert={@message.message_type == "user"} />
       </div>
-
-      <div class="flex-1 min-w-0 flex flex-col gap-3">
-        <%= if @content_text && @content_text != "" do %>
-          <div class={[
-            "px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed",
-            @message.message_type == "user" &&
-              "bg-[var(--color-user-message)] text-white",
-            @message.message_type == "assistant" && "bg-[var(--color-surface)]",
-            @message.message_type == "tool" && "bg-[var(--color-background)]"
-          ]}>
-            <.markdown text={@content_text} invert={@message.message_type == "user"} />
-          </div>
-        <% end %>
-      </div>
-    </div>
+    <% end %>
     """
   end
 
@@ -630,7 +610,7 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class="flex-1 min-w-0">
         <button
           type="button"
-          class="flex items-center gap-2 w-full text-left py-1 px-2 rounded hover:bg-[var(--color-border-light)] transition-colors cursor-pointer border-none bg-transparent"
+          class="flex items-center gap-2 w-full text-left py-1 px-4 rounded hover:bg-[var(--color-border-light)] transition-colors cursor-pointer border-none bg-transparent"
           phx-click={
             JS.toggle(to: "##{@thinking_id}")
             |> JS.toggle_class("rotate-90", to: "##{@chevron_id}")
@@ -645,7 +625,7 @@ defmodule AgentsDemoWeb.ChatComponents do
         </button>
 
         <%= if @content_text && @content_text != "" do %>
-          <div id={@thinking_id} class="hidden mt-1 ml-5">
+          <div id={@thinking_id} class="hidden mt-1 ml-4">
             <div class="px-3 py-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
               <.markdown
                 text={@content_text}
@@ -665,7 +645,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   # Component: Tool Call Message (with status and debug mode support)
   def tool_call_message(assigns) do
     ~H"""
-    <div class="tool-call-message ml-14" data-status={@message.status}>
+    <div class="tool-call-message ml-2" data-status={@message.status}>
       <%= if @debug_mode do %>
         <.tool_call_debug_view message={@message} />
       <% else %>
@@ -697,7 +677,7 @@ defmodule AgentsDemoWeb.ChatComponents do
       |> assign(:icon_class, icon_class)
 
     ~H"""
-    <div class="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+    <div class="flex items-center gap-2 ml-1 pl-3 pr-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
       <.icon
         name={
           cond do
@@ -819,9 +799,9 @@ defmodule AgentsDemoWeb.ChatComponents do
   # Completion action theme - green tint for success, red for errors
   def tool_result_display(assigns) do
     ~H"""
-    <div class="ml-14">
+    <div>
       <div class={[
-        "border rounded-lg p-3",
+        "border rounded-lg p-3 ml-2",
         @is_error && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
         !@is_error &&
           "bg-green-50/30 dark:bg-green-950/10 border-green-200/50 dark:border-green-900/30"
@@ -951,8 +931,8 @@ defmodule AgentsDemoWeb.ChatComponents do
       <%= if @tool_calls != [] do %>
         <div class="flex flex-col gap-2 mt-2">
           <%= for tool <- @tool_calls do %>
-            <div class="tool-call-message ml-14">
-              <div class="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+            <div class="tool-call-message ml-2">
+              <div class="flex items-center gap-2 pl-3 pr-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
                 <%!-- Different icons based on tool status --%>
                 <%= cond do %>
                   <% tool.status == "identified" -> %>
