@@ -11,6 +11,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   alias Phoenix.LiveView.JS
   alias LangChain.MessageDelta
   alias LangChain.Message.ContentPart
+  alias LangChain.Message.ToolCall
 
   attr :collapsed, :boolean, default: false
   attr :active_tab, :string, default: "tasks"
@@ -677,7 +678,8 @@ defmodule AgentsDemoWeb.ChatComponents do
   # Normal user view - friendly display
   defp tool_call_normal_view(assigns) do
     display_text =
-      get_in(assigns.message.metadata, ["display_text"]) ||
+      get_in(assigns.message.content, ["display_text"]) ||
+        get_in(assigns.message.metadata, ["display_text"]) ||
         friendly_fallback(get_in(assigns.message.content, ["name"]))
 
     # Build icon class string based on status
@@ -714,11 +716,9 @@ defmodule AgentsDemoWeb.ChatComponents do
         <% end %>
       </span>
 
-      <%= if @message.status == "failed" do %>
-        <span class="text-xs text-red-600 dark:text-red-400 ml-auto">
-          Failed: {get_in(@message.metadata, ["error"])}
-        </span>
-      <% end %>
+      <span :if={@message.status == "failed"} class="text-xs text-red-600 dark:text-red-400 ml-auto">
+        Failed
+      </span>
     </div>
     """
   end
@@ -885,8 +885,23 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   # Component: Streaming Message (being typed)
   def streaming_message(assigns) do
-    # Extract tool call info from delta metadata
-    tool_calls = MessageDelta.get_tool_display_info(assigns.streaming_delta)
+    # Build tool display list directly from delta.tool_calls
+    tool_calls =
+      case assigns.streaming_delta do
+        %{tool_calls: tcs} when is_list(tcs) and tcs != [] ->
+          tcs
+          |> Enum.filter(& &1.name)
+          |> Enum.map(fn tc ->
+            %{
+              name: tc.name,
+              display_name: tc.display_text || LangChain.Utils.humanize_tool_name(tc.name),
+              status: ToolCall.execution_status(tc, "identified")
+            }
+          end)
+
+        _ ->
+          []
+      end
 
     # Convert merged_content to string for display
     assigns =
@@ -940,10 +955,10 @@ defmodule AgentsDemoWeb.ChatComponents do
               <div class="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
                 <%!-- Different icons based on tool status --%>
                 <%= cond do %>
-                  <% tool.status == :identified -> %>
+                  <% tool.status == "identified" -> %>
                     <%!-- Tool identified but not executing yet --%>
                     <.icon name="hero-sparkles" class="w-5 h-5 text-blue-500 animate-pulse" />
-                  <% tool.status == :executing -> %>
+                  <% tool.status == "executing" -> %>
                     <%!-- Tool executing --%>
                     <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-blue-500 animate-spin" />
                   <% true -> %>

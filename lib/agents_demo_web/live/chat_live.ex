@@ -538,16 +538,6 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:display_messages_batch_saved, display_messages}}, socket) do
-    Logger.debug("Batch saved #{length(display_messages)} messages, reloading once")
-
-    {:noreply,
-     socket
-     |> AgentLiveHelpers.handle_display_messages_batch_saved(display_messages)
-     |> push_event("scroll-to-bottom", %{})}
-  end
-
-  @impl true
   def handle_info({:agent, {:display_message_saved, display_msg}}, socket) do
     {:noreply,
      socket
@@ -614,8 +604,6 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_info({:agent, {:tool_execution_completed, call_id, tool_result}}, socket) do
-    Logger.debug("Tool execution completed: #{call_id}")
-
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_tool_execution_completed(call_id, tool_result)

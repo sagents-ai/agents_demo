@@ -341,7 +341,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.streaming_delta.role == :assistant
     end
 
-    test "adds tool display info for new tool calls" do
+    test "preserves tool calls on streaming delta" do
       socket = new_socket(%{streaming_delta: nil})
 
       tool_call = %ToolCall{
@@ -360,11 +360,10 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       result = AgentLiveHelpers.handle_llm_deltas(socket, [delta])
 
-      tools = MessageDelta.get_tool_display_info(result.assigns.streaming_delta)
-      assert length(tools) == 1
-      assert List.first(tools).name == "file_write"
-      assert List.first(tools).call_id == "call-123"
-      assert List.first(tools).status == :identified
+      # Tool calls should be present on the delta's tool_calls field
+      assert [tc] = result.assigns.streaming_delta.tool_calls
+      assert tc.name == "file_write"
+      assert tc.call_id == "call-123"
     end
   end
 
@@ -380,17 +379,17 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     end
 
     test "keeps streaming_delta when tool calls are present" do
-      tool_info = %{
+      tool_call = %ToolCall{
         call_id: "call-123",
         name: "file_write",
-        display_name: "File write",
-        status: :identified
+        display_text: "File write",
+        status: :incomplete
       }
 
       delta = %MessageDelta{
         role: :assistant,
         content: nil,
-        metadata: %{streaming_tool_calls: [tool_info]},
+        tool_calls: [tool_call],
         status: :complete
       }
 
@@ -400,55 +399,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       assert result.assigns.streaming_delta != nil
       assert result.assigns.loading == false
-    end
-  end
-
-  describe "handle_display_messages_batch_saved/2" do
-    test "sets has_messages to true" do
-      socket = new_socket(%{has_messages: false})
-
-      result = AgentLiveHelpers.handle_display_messages_batch_saved(socket, [])
-
-      assert result.assigns.has_messages == true
-    end
-
-    test "reloads messages from DB when no pending tools" do
-      socket = new_socket(%{conversation_id: 123, streaming_delta: nil})
-
-      Conversations
-      |> expect(:load_display_messages, fn conv_id ->
-        assert conv_id == 123
-        [%{id: 1, content: "Message 1"}]
-      end)
-
-      result = AgentLiveHelpers.handle_display_messages_batch_saved(socket, [])
-
-      assert result.assigns.has_messages == true
-      assert result.assigns.streaming_delta == nil
-    end
-
-    test "does not reload when pending tools exist" do
-      tool_info = %{
-        call_id: "call-123",
-        name: "file_write",
-        display_name: "File write",
-        status: :executing
-      }
-
-      delta = %MessageDelta{
-        metadata: %{streaming_tool_calls: [tool_info]}
-      }
-
-      socket = new_socket(%{conversation_id: 123, streaming_delta: delta})
-
-      Conversations
-      |> stub(:load_display_messages, fn _ -> raise "Should not be called" end)
-
-      result = AgentLiveHelpers.handle_display_messages_batch_saved(socket, [])
-
-      assert result.assigns.has_messages == true
-      # Delta should still be present
-      assert result.assigns.streaming_delta == delta
     end
   end
 
@@ -492,7 +442,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   # ============================================================================
 
   describe "handle_tool_call_identified/2" do
-    test "updates streaming_delta with tool display info" do
+    test "creates streaming delta with tool call when delta is nil" do
       socket = new_socket(%{streaming_delta: nil})
 
       tool_info = %{
@@ -504,38 +454,58 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       result = AgentLiveHelpers.handle_tool_call_identified(socket, tool_info)
 
-      tools = MessageDelta.get_tool_display_info(result.assigns.streaming_delta)
-      assert length(tools) == 1
-      assert List.first(tools).display_name == "Write file"
+      # Should create a delta with the tool call
+      assert [tc] = result.assigns.streaming_delta.tool_calls
+      assert tc.name == "file_write"
+      assert tc.display_text == "Write file"
+      # Should track status in ToolCall metadata
+      assert ToolCall.execution_status(tc) == "identified"
     end
 
-    test "uses tool name as fallback when display_text is missing" do
-      socket = new_socket(%{streaming_delta: nil})
+    test "sets display_text on existing delta tool call" do
+      tool_call = %ToolCall{
+        call_id: "call-123",
+        name: "file_write",
+        status: :incomplete
+      }
+
+      delta = %MessageDelta{
+        role: :assistant,
+        tool_calls: [tool_call],
+        status: :incomplete
+      }
+
+      socket = new_socket(%{streaming_delta: delta})
 
       tool_info = %{
         call_id: "call-123",
-        name: "web_search",
-        arguments: %{"query" => "test"}
+        name: "file_write",
+        display_text: "Write file"
       }
 
       result = AgentLiveHelpers.handle_tool_call_identified(socket, tool_info)
 
-      tools = MessageDelta.get_tool_display_info(result.assigns.streaming_delta)
-      assert List.first(tools).display_name == "web_search"
+      # display_text should be set on the ToolCall
+      assert [tc] = result.assigns.streaming_delta.tool_calls
+      assert tc.display_text == "Write file"
+      # Status should be in ToolCall metadata
+      assert ToolCall.execution_status(tc) == "identified"
     end
   end
 
   describe "handle_tool_execution_started/2" do
-    test "updates tool status to executing in streaming_delta" do
-      tool_info_initial = %{
+    test "tracks tool status as executing" do
+      tool_call = %ToolCall{
         call_id: "call-123",
         name: "file_write",
-        display_name: "File write",
-        status: :identified
+        display_text: "File write",
+        status: :incomplete
       }
 
       delta = %MessageDelta{
-        metadata: %{streaming_tool_calls: [tool_info_initial]}
+        role: :assistant,
+        tool_calls: [tool_call],
+        status: :incomplete
       }
 
       socket = new_socket(%{streaming_delta: delta})
@@ -551,8 +521,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       result = AgentLiveHelpers.handle_tool_execution_started(socket, tool_info)
 
-      tools = MessageDelta.get_tool_display_info(result.assigns.streaming_delta)
-      assert List.first(tools).status == :executing
+      # Status should be in ToolCall metadata
+      assert [tc] = result.assigns.streaming_delta.tool_calls
+      assert ToolCall.execution_status(tc) == "executing"
     end
 
     test "updates database when tool call exists" do
