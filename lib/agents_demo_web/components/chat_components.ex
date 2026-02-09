@@ -454,7 +454,7 @@ defmodule AgentsDemoWeb.ChatComponents do
         <div class="flex flex-1 flex-col overflow-hidden relative">
           <div
             id="chat-messages-container"
-            class="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-6"
+            class="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-4"
             phx-hook="ChatContainer"
           >
             <%= if not @has_messages do %>
@@ -897,60 +897,43 @@ defmodule AgentsDemoWeb.ChatComponents do
       )
 
     ~H"""
-    <div>
-      <%!-- Message bubble with thinking, text, and cursor --%>
-      <div class="flex gap-4 max-w-full">
-        <div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-[var(--color-avatar-bg)] text-[var(--color-primary)]">
-          <.icon name="hero-cpu-chip" class="w-5 h-5" />
+    <div class="flex flex-col gap-4">
+      <.thinking_display
+        :if={@thinking}
+        message_id="streaming_delta"
+        content_text={@thinking}
+      />
+
+      <%!-- Text content as its own block, matching saved text_message layout --%>
+      <%= if @content != "" do %>
+        <div class="px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
+          <.markdown text={@content} />
+          <span :if={@tool_calls == []} class="ml-1 inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"></span>
         </div>
+      <% end %>
 
-        <div class="flex-1 min-w-0">
-          <div class="px-4 py-3 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-            <.thinking_display
-              :if={@thinking}
-              class="mb-2"
-              message_id="streaming_delta"
-              content_text={@thinking}
-            />
+      <%!-- Cursor when no content yet --%>
+      <%= if @content == "" && @tool_calls == [] do %>
+        <div class="px-4 py-1.5">
+          <span class="inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"></span>
+        </div>
+      <% end %>
 
-            <%!-- Show text content if present --%>
-            <%= if @content != "" do %>
-              <div>
-                <.markdown text={@content} />
-              </div>
+      <%= for tool <- @tool_calls do %>
+        <div class="tool-call-message ml-2">
+          <div class="ml-1 flex items-center gap-2 pl-3 pr-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+            <%= cond do %>
+              <% tool.status == "identified" -> %>
+                <.icon name="hero-sparkles" class="w-5 h-5 text-blue-500 animate-pulse" />
+              <% tool.status == "executing" -> %>
+                <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-blue-500 animate-spin" />
+              <% true -> %>
+                <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-blue-500" />
             <% end %>
-
-            <%!-- Blinking cursor - only show when no tool calls (message still streaming) --%>
-            <%= if @tool_calls == [] do %>
-              <span class="inline-block w-2 h-4 ml-1 bg-[var(--color-primary)] animate-pulse"></span>
-            <% end %>
+            <span class="text-sm text-gray-700 dark:text-gray-300">
+              {tool.display_name}
+            </span>
           </div>
-        </div>
-      </div>
-
-      <%= if @tool_calls != [] do %>
-        <div class="flex flex-col gap-2 mt-2">
-          <%= for tool <- @tool_calls do %>
-            <div class="tool-call-message ml-2">
-              <div class="flex items-center gap-2 pl-3 pr-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
-                <%!-- Different icons based on tool status --%>
-                <%= cond do %>
-                  <% tool.status == "identified" -> %>
-                    <%!-- Tool identified but not executing yet --%>
-                    <.icon name="hero-sparkles" class="w-5 h-5 text-blue-500 animate-pulse" />
-                  <% tool.status == "executing" -> %>
-                    <%!-- Tool executing --%>
-                    <.icon name="hero-cog-6-tooth" class="w-5 h-5 text-blue-500 animate-spin" />
-                  <% true -> %>
-                    <%!-- Fallback --%>
-                    <.icon name="hero-wrench-screwdriver" class="w-5 h-5 text-blue-500" />
-                <% end %>
-                <span class="text-sm text-gray-700 dark:text-gray-300">
-                  {tool.display_name}
-                </span>
-              </div>
-            </div>
-          <% end %>
         </div>
       <% end %>
     </div>
