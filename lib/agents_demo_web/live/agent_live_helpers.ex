@@ -421,23 +421,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   to stay visible until tools finish executing.
   """
   def handle_llm_message_complete(socket) do
-    current_delta = socket.assigns[:streaming_delta]
-
-    has_tool_calls =
-      case current_delta do
-        %{tool_calls: tcs} when is_list(tcs) and tcs != [] -> true
-        _ -> false
-      end
-
-    socket =
-      if has_tool_calls do
-        # Keep streaming_delta visible while tools are still executing
-        socket
-      else
-        assign(socket, :streaming_delta, nil)
-      end
-
-    assign(socket, :loading, false)
+    # Clear streaming_delta - persisted display messages (from display_message_saved)
+    # are now the authoritative display. Tool execution status is tracked via
+    # database updates and stream_inserts in the tool execution handlers.
+    socket
+    |> assign(:streaming_delta, nil)
+    |> assign(:loading, false)
   end
 
   @doc """
@@ -449,7 +438,11 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   def handle_display_message_saved(socket, display_msg) do
     socket =
       if socket.assigns[:conversation_id] do
-        reload_messages_from_db(socket)
+        # Clear streaming_delta - persisted messages are now the authoritative display.
+        # All display messages are saved to DB before broadcasting, so reload gets them all.
+        socket
+        |> assign(:streaming_delta, nil)
+        |> reload_messages_from_db()
       else
         stream_insert(socket, :messages, display_msg)
       end
@@ -536,9 +529,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
       {:error, reason} -> Logger.error("Failed to complete tool call: #{inspect(reason)}")
     end
 
-    # Reload messages if we had a streaming delta
+    # Always reload to show completed status in the messages stream
     socket =
-      if socket.assigns.streaming_delta && socket.assigns[:conversation_id] do
+      if socket.assigns[:conversation_id] do
         reload_messages_from_db(socket)
       else
         socket
@@ -563,9 +556,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
       {:error, reason} -> Logger.error("Failed to mark tool call as failed: #{inspect(reason)}")
     end
 
-    # Reload messages if we had a streaming delta
+    # Always reload to show failed status in the messages stream
     socket =
-      if socket.assigns.streaming_delta && socket.assigns[:conversation_id] do
+      if socket.assigns[:conversation_id] do
         reload_messages_from_db(socket)
       else
         socket

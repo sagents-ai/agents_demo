@@ -291,11 +291,10 @@ defmodule AgentsDemo.Conversations do
           {:ok, DisplayMessage.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def mark_tool_executing(call_id) do
     query =
-      from(m in DisplayMessage,
+      from m in DisplayMessage,
         where: fragment("?->>'call_id' = ?", m.content, ^call_id),
         where: m.content_type == "tool_call",
         where: m.status == "pending"
-      )
 
     case Repo.one(query) do
       nil ->
@@ -331,11 +330,10 @@ defmodule AgentsDemo.Conversations do
           {:ok, DisplayMessage.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def complete_tool_call(call_id, result_metadata \\ %{}) do
     query =
-      from(m in DisplayMessage,
+      from m in DisplayMessage,
         where: fragment("?->>'call_id' = ?", m.content, ^call_id),
         where: m.content_type == "tool_call",
         where: m.status in ["pending", "executing"]
-      )
 
     case Repo.one(query) do
       nil ->
@@ -376,11 +374,10 @@ defmodule AgentsDemo.Conversations do
           {:ok, DisplayMessage.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def fail_tool_call(call_id, error_info \\ %{}) do
     query =
-      from(m in DisplayMessage,
+      from m in DisplayMessage,
         where: fragment("?->>'call_id' = ?", m.content, ^call_id),
         where: m.content_type == "tool_call",
         where: m.status in ["pending", "executing"]
-      )
 
     case Repo.one(query) do
       nil ->
@@ -447,7 +444,7 @@ defmodule AgentsDemo.Conversations do
   defp scope_query(query, %Scope{} = scope) do
     # CUSTOMIZE THIS: Use your scope's actual fields
     owner_id = get_owner_id(scope)
-    from(q in query, where: q.user_id == ^owner_id)
+    from q in query, where: q.user_id == ^owner_id
   end
 
   # Extracts the owner ID from the scope struct.

@@ -908,7 +908,11 @@ defmodule AgentsDemoWeb.ChatComponents do
       <%= if @content != "" do %>
         <div class="px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
           <.markdown text={@content} />
-          <span :if={@tool_calls == []} class="ml-1 inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"></span>
+          <span
+            :if={@tool_calls == []}
+            class="ml-1 inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"
+          >
+          </span>
         </div>
       <% end %>
 
