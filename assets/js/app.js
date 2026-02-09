@@ -49,6 +49,13 @@ const Hooks = {
       this.throttledScroll = this.throttle(this.handleScroll, 200)
       this.el.addEventListener("scroll", this.throttledScroll)
     },
+    updated() {
+      // After DOM updates (e.g. item deletion), check if content no longer
+      // fills the container. If so, load more to backfill the gap.
+      if (this.el.scrollHeight <= this.el.clientHeight) {
+        this.pushEvent("load_more_conversations", {})
+      }
+    },
     destroyed() {
       this.el.removeEventListener("scroll", this.throttledScroll)
     },
