@@ -75,7 +75,7 @@ defmodule AgentsDemo.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:mdex, "~> 0.11"},
-      {:autumn, "~> 0.6"},
+      {:lumis, "~> 0.1"},
       {:tidewave, "~> 0.5", only: :dev}
     ]
   end
