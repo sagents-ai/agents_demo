@@ -1169,13 +1169,13 @@ defmodule AgentsDemoWeb.ChatComponents do
   end
 
   @doc """
-  Render code content with syntax highlighting using Autumn.
+  Render code content with syntax highlighting using Lumis.
   """
   def render_markdown_code(nil), do: Phoenix.HTML.raw(nil)
 
   def render_markdown_code(text) when is_binary(text) do
     text
-    |> Autumn.highlight!(language: "markdown")
+    |> Lumis.highlight!(language: "markdown")
     |> Phoenix.HTML.raw()
   end
 

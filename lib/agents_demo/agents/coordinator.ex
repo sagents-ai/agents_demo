@@ -99,8 +99,6 @@ defmodule AgentsDemo.Agents.Coordinator do
   """
 
   alias Sagents.{State, AgentServer, AgentSupervisor, AgentsDynamicSupervisor}
-  alias LangChain.Message
-  alias Sagents.Message.DisplayHelpers
   require Logger
 
   # PubSub configuration - single source of truth
@@ -319,7 +317,6 @@ defmodule AgentsDemo.Agents.Coordinator do
 
     - `conversation_id` - The conversation being viewed
     - `viewer_id` - Unique identifier for the viewer (typically user_id)
-    - `pid` - The process to track (typically self())
     - `metadata` - Optional metadata map (default: empty map)
 
   ## Returns
@@ -331,21 +328,20 @@ defmodule AgentsDemo.Agents.Coordinator do
 
       # In a LiveView after socket is connected
       if connected?(socket) do
-        {:ok, _ref} = Coordinator.track_conversation_viewer(conversation_id, user.id, self())
+        {:ok, _ref} = Coordinator.track_conversation_viewer(conversation_id, user.id)
       end
 
       # With metadata
       Coordinator.track_conversation_viewer(
         conversation_id,
         user.id,
-        self(),
         %{username: user.name}
       )
   """
-  def track_conversation_viewer(conversation_id, viewer_id, pid, metadata \\ %{}) do
+  def track_conversation_viewer(conversation_id, viewer_id, metadata \\ %{}) do
     topic = presence_topic(conversation_id)
     full_metadata = Map.merge(%{joined_at: System.system_time(:second)}, metadata)
-    Sagents.Presence.track(@presence_module, topic, viewer_id, pid, full_metadata)
+    Sagents.Presence.track(@presence_module, topic, viewer_id, full_metadata)
   end
 
   @doc """
@@ -357,7 +353,6 @@ defmodule AgentsDemo.Agents.Coordinator do
 
     - `conversation_id` - The conversation to untrack from
     - `viewer_id` - Unique identifier for the viewer (typically user_id)
-    - `pid` - The process to untrack (typically self())
 
   ## Returns
 
@@ -366,11 +361,11 @@ defmodule AgentsDemo.Agents.Coordinator do
   ## Examples
 
       # When switching conversations
-      AgentsDemo.Agents.Coordinator.untrack_conversation_viewer(old_conversation_id, user.id, self())
+      AgentsDemo.Agents.Coordinator.untrack_conversation_viewer(old_conversation_id, user.id)
   """
-  def untrack_conversation_viewer(conversation_id, viewer_id, pid) do
+  def untrack_conversation_viewer(conversation_id, viewer_id) do
     topic = presence_topic(conversation_id)
-    Sagents.Presence.untrack(@presence_module, topic, viewer_id, pid)
+    Sagents.Presence.untrack(@presence_module, topic, viewer_id)
   end
 
   @doc """
@@ -400,95 +395,6 @@ defmodule AgentsDemo.Agents.Coordinator do
   """
   def pubsub_name do
     @pubsub_name
-  end
-
-  @doc """
-  Save a LangChain Message as DisplayMessage(s) to the database.
-
-  Converts a single LangChain.Message into one or more DisplayMessage records
-  and persists them to the conversation. A single Message can produce multiple
-  DisplayMessages (e.g., text + tool_calls, or multiple tool_results).
-
-  This function bridges the gap between the library's Message-centric world
-  and the application's DisplayMessage persistence layer.
-
-  ## Parameters
-
-  - `conversation_id` - The conversation ID
-  - `message` - A `%LangChain.Message{}` struct
-
-  ## Returns
-
-  - `{:ok, [%DisplayMessage{}]}` - List of saved DisplayMessages
-  - `{:error, reason}` - Failed to save
-
-  ## Examples
-
-      # User message
-      message = Message.new_user!("Hello")
-      {:ok, [display_msg]} = AgentsDemo.Agents.Coordinator.save_message(conversation_id, message)
-
-      # Assistant message with text and tool calls
-      message = Message.new_assistant!(%{
-        content: "Let me search...",
-        tool_calls: [ToolCall.new!(%{...})]
-      })
-      {:ok, [text_msg, tool_call_msg]} = AgentsDemo.Agents.Coordinator.save_message(conversation_id, message)
-  """
-  def save_message(conversation_id, %Message{} = message) do
-    Logger.debug(
-      "#{__MODULE__}.save_message called for conversation #{conversation_id}, message role: #{message.role}"
-    )
-
-    # Use library helper to extract displayable items
-    display_items = DisplayHelpers.extract_display_items(message)
-
-    if Enum.empty?(display_items) do
-      {:ok, []}
-    else
-      result =
-        Enum.reduce_while(display_items, {:ok, []}, fn item, {:ok, acc} ->
-          attrs = %{
-            "message_type" => Atom.to_string(item.message_type),
-            "content_type" => Atom.to_string(item.type),
-            "content" => item.content
-          }
-
-          # Set status to "pending" for tool calls
-          attrs =
-            if item.type == :tool_call do
-              Map.put(attrs, "status", "pending")
-            else
-              attrs
-            end
-
-          Logger.debug(
-            "Attempting to save display message: type=#{attrs["content_type"]}, message_type=#{attrs["message_type"]}"
-          )
-
-          case AgentsDemo.Conversations.append_display_message(conversation_id, attrs) do
-            {:ok, display_msg} ->
-              Logger.debug("Successfully persisted DisplayMessage id=#{display_msg.id}")
-              {:cont, {:ok, acc ++ [display_msg]}}
-
-            {:error, reason} ->
-              Logger.error(
-                "Failed to persist DisplayMessage (#{attrs["content_type"]}): #{inspect(reason)}"
-              )
-
-              {:halt, {:error, reason}}
-          end
-        end)
-
-      case result do
-        {:ok, display_messages} ->
-          Logger.debug("Returning #{length(display_messages)} display messages")
-          {:ok, display_messages}
-
-        error ->
-          error
-      end
-    end
   end
 
   # Private Functions
@@ -550,7 +456,8 @@ defmodule AgentsDemo.Agents.Coordinator do
       presence_tracking: presence_tracking,
       presence_module: @presence_module,
       conversation_id: conversation_id,
-      save_new_message_fn: &__MODULE__.save_message/2
+      agent_persistence: AgentsDemo.Agents.AgentPersistence,
+      display_message_persistence: AgentsDemo.Agents.DisplayMessagePersistence
     ]
 
     case AgentsDynamicSupervisor.start_agent_sync(supervisor_config) do
@@ -584,7 +491,9 @@ defmodule AgentsDemo.Agents.Coordinator do
   defp create_conversation_state(conversation_id) do
     agent_id = conversation_agent_id(conversation_id)
 
-    case AgentsDemo.Conversations.load_agent_state(conversation_id) do
+    load_result = AgentsDemo.Agents.AgentPersistence.load_state(agent_id)
+
+    case load_result do
       {:ok, exported_state} ->
         Logger.info(
           "Found saved state for conversation #{conversation_id}, attempting to restore..."

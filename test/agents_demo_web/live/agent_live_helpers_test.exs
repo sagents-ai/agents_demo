@@ -103,56 +103,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     test "sets agent_status to :idle and loading to false" do
       socket = new_socket(%{agent_id: "test-agent", conversation_id: 1, loading: true})
 
-      Conversations
-      |> stub(:save_agent_state, fn _conv_id, _state -> {:ok, %{}} end)
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _agent_id -> %{} end)
-
       result = AgentLiveHelpers.handle_status_idle(socket)
 
       assert result.assigns.agent_status == :idle
       assert result.assigns.loading == false
     end
 
-    test "persists agent state when conversation_id and agent_id are present" do
-      socket = new_socket(%{agent_id: "test-agent", conversation_id: 123})
-
-      Sagents.AgentServer
-      |> expect(:export_state, fn agent_id ->
-        assert agent_id == "test-agent"
-        %{messages: []}
-      end)
-
-      Conversations
-      |> expect(:save_agent_state, fn conv_id, state ->
-        assert conv_id == 123
-        assert state == %{messages: []}
-        {:ok, %{}}
-      end)
-
-      AgentLiveHelpers.handle_status_idle(socket)
-    end
-
-    test "does not persist state when conversation_id is missing" do
-      socket = new_socket(%{agent_id: "test-agent"})
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> raise "Should not be called" end)
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> raise "Should not be called" end)
-
-      # Should not raise
-      result = AgentLiveHelpers.handle_status_idle(socket)
-      assert result.assigns.agent_status == :idle
-    end
-
     test "does not reload filesystem when filesystem_scope is absent" do
       socket = new_socket()
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
 
       Sagents.FileSystemServer
       |> stub(:list_files, fn _ -> raise "Should not be called" end)
@@ -209,9 +167,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     test "sets agent_status to :error and loading to false" do
       socket = new_socket(%{loading: true}, [:messages])
 
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
-
       result = AgentLiveHelpers.handle_status_error(socket, "test error")
 
       assert result.assigns.agent_status == :error
@@ -224,7 +179,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       error = %LangChain.LangChainError{message: "API rate limit exceeded"}
 
       Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
       |> expect(:append_text_message, fn _conv_id, _type, text ->
         assert text =~ "API rate limit exceeded"
         {:ok, %{id: 1}}
@@ -237,7 +191,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{conversation_id: 123}, [:messages])
 
       Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
       |> expect(:append_text_message, fn _conv_id, _type, text ->
         assert text =~ "some_error"
         {:ok, %{id: 1}}
@@ -245,34 +198,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       AgentLiveHelpers.handle_status_error(socket, :some_error)
     end
-
-    test "persists agent state on error" do
-      socket = new_socket(%{agent_id: "test-agent", conversation_id: 123}, [:messages])
-
-      Sagents.AgentServer
-      |> expect(:export_state, fn agent_id ->
-        assert agent_id == "test-agent"
-        %{messages: []}
-      end)
-
-      Conversations
-      |> expect(:save_agent_state, fn conv_id, _state ->
-        assert conv_id == 123
-        {:ok, %{}}
-      end)
-      |> stub(:append_text_message, fn _, _, _ -> {:ok, %{id: 1}} end)
-
-      AgentLiveHelpers.handle_status_error(socket, "test error")
-    end
   end
 
   describe "handle_status_interrupted/2" do
     test "sets agent_status to :interrupted and loading to false" do
       socket = new_socket(%{loading: true})
       interrupt_data = %{action_requests: []}
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
 
       result = AgentLiveHelpers.handle_status_interrupted(socket, interrupt_data)
 
@@ -289,9 +220,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       interrupt_data = %{action_requests: action_requests}
 
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
-
       result = AgentLiveHelpers.handle_status_interrupted(socket, interrupt_data)
 
       assert result.assigns.pending_tools == action_requests
@@ -301,9 +229,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     test "handles empty action_requests" do
       socket = new_socket()
       interrupt_data = %{}
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
 
       result = AgentLiveHelpers.handle_status_interrupted(socket, interrupt_data)
 
@@ -378,7 +303,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.loading == false
     end
 
-    test "keeps streaming_delta when tool calls are present" do
+    test "clears streaming_delta even when tool calls are present" do
       tool_call = %ToolCall{
         call_id: "call-123",
         name: "file_write",
@@ -397,7 +322,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       result = AgentLiveHelpers.handle_llm_message_complete(socket)
 
-      assert result.assigns.streaming_delta != nil
+      # streaming_delta is always cleared — persisted display messages are
+      # the authoritative display, tool status tracked via DB updates
+      assert result.assigns.streaming_delta == nil
       assert result.assigns.loading == false
     end
   end
@@ -493,8 +420,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     end
   end
 
-  describe "handle_tool_execution_started/2" do
-    test "tracks tool status as executing" do
+  describe "handle_tool_execution_update/3" do
+    test "updates streaming delta to executing status" do
       tool_call = %ToolCall{
         call_id: "call-123",
         name: "file_write",
@@ -510,118 +437,57 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       socket = new_socket(%{streaming_delta: delta})
 
-      Conversations
-      |> stub(:mark_tool_executing, fn _ -> {:error, :not_found} end)
-
       tool_info = %{
         call_id: "call-123",
         name: "file_write",
         display_text: "File write"
       }
 
-      result = AgentLiveHelpers.handle_tool_execution_started(socket, tool_info)
+      result = AgentLiveHelpers.handle_tool_execution_update(socket, :executing, tool_info)
 
       # Status should be in ToolCall metadata
       assert [tc] = result.assigns.streaming_delta.tool_calls
       assert ToolCall.execution_status(tc) == "executing"
     end
 
-    test "updates database when tool call exists" do
-      socket = new_socket(%{streaming_delta: nil}, [:messages])
-
-      Conversations
-      |> expect(:mark_tool_executing, fn call_id ->
-        assert call_id == "call-123"
-        {:ok, %{id: 1, status: :executing}}
-      end)
-
-      tool_info = %{
-        call_id: "call-123",
-        name: "file_write",
-        display_text: "File write",
-        arguments: %{"path" => "test.txt"}
-      }
-
-      AgentLiveHelpers.handle_tool_execution_started(socket, tool_info)
-    end
-  end
-
-  describe "handle_tool_execution_completed/3" do
-    test "clears streaming_delta" do
-      delta = %MessageDelta{}
+    test "clears streaming delta on completed" do
+      delta = %MessageDelta{role: :assistant, status: :incomplete}
       socket = new_socket(%{streaming_delta: delta})
 
-      Conversations
-      |> stub(:complete_tool_call, fn _, _ -> {:ok, %{}} end)
+      tool_info = %{call_id: "call-123", name: "file_write", result: "success"}
 
-      result = AgentLiveHelpers.handle_tool_execution_completed(socket, "call-123", "success")
-
+      result = AgentLiveHelpers.handle_tool_execution_update(socket, :completed, tool_info)
       assert result.assigns.streaming_delta == nil
     end
 
-    test "updates database with result metadata" do
-      socket = new_socket()
+    test "clears streaming delta on failed" do
+      delta = %MessageDelta{role: :assistant, status: :incomplete}
+      socket = new_socket(%{streaming_delta: delta})
 
-      Conversations
-      |> expect(:complete_tool_call, fn call_id, metadata ->
-        assert call_id == "call-123"
-        assert metadata["result"] == "\"success\""
-        {:ok, %{}}
-      end)
+      tool_info = %{call_id: "call-123", name: "file_write", error: "something went wrong"}
 
-      AgentLiveHelpers.handle_tool_execution_completed(socket, "call-123", "success")
+      result = AgentLiveHelpers.handle_tool_execution_update(socket, :failed, tool_info)
+      assert result.assigns.streaming_delta == nil
     end
 
-    test "reloads messages when streaming_delta and conversation_id exist" do
-      delta = %MessageDelta{}
-      socket = new_socket(%{streaming_delta: delta, conversation_id: 123}, [:messages])
+    test "handles nil streaming delta gracefully" do
+      socket = new_socket(%{streaming_delta: nil})
 
-      Conversations
-      |> stub(:complete_tool_call, fn _, _ -> {:ok, %{}} end)
-      |> expect(:load_display_messages, fn conv_id ->
-        assert conv_id == 123
-        []
-      end)
+      tool_info = %{call_id: "call-123", name: "file_write", display_text: "File write"}
 
-      AgentLiveHelpers.handle_tool_execution_completed(socket, "call-123", "success")
-    end
-
-    test "handles database errors gracefully" do
-      socket = new_socket()
-
-      Conversations
-      |> stub(:complete_tool_call, fn _, _ -> {:error, :database_error} end)
-
-      # Should not raise
-      result = AgentLiveHelpers.handle_tool_execution_completed(socket, "call-123", "success")
+      result = AgentLiveHelpers.handle_tool_execution_update(socket, :executing, tool_info)
       assert result.assigns.streaming_delta == nil
     end
   end
 
-  describe "handle_tool_execution_failed/3" do
-    test "clears streaming_delta" do
-      delta = %MessageDelta{}
-      socket = new_socket(%{streaming_delta: delta})
+  describe "handle_display_message_updated/2" do
+    test "inserts updated message into stream" do
+      socket = new_socket(%{}, [:messages])
 
-      Conversations
-      |> stub(:fail_tool_call, fn _, _ -> {:ok, %{}} end)
+      updated_msg = %{id: 1, status: :executing}
 
-      result = AgentLiveHelpers.handle_tool_execution_failed(socket, "call-123", "error")
-
-      assert result.assigns.streaming_delta == nil
-    end
-
-    test "updates database with error metadata" do
-      socket = new_socket()
-
-      Conversations
-      |> expect(:fail_tool_call, fn call_id, metadata ->
-        assert call_id == "call-123"
-        assert metadata["error"] =~ "error"
-        {:ok, %{}}
-      end)
-
-      AgentLiveHelpers.handle_tool_execution_failed(socket, "call-123", :some_error)
+      result = AgentLiveHelpers.handle_display_message_updated(socket, updated_msg)
+      assert result != nil
     end
   end
 
@@ -642,10 +508,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
         assert attrs.title == "New Title"
         {:ok, %{conv | title: "New Title"}}
       end)
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> %{} end)
 
       result =
         AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
@@ -696,10 +558,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       |> stub(:update_conversation, fn conv, _attrs ->
         {:ok, %{conv | title: "New Title"}}
       end)
-      |> stub(:save_agent_state, fn _, _ -> {:ok, %{}} end)
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> %{} end)
 
       result =
         AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
@@ -731,87 +589,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     end
   end
 
-  # ============================================================================
+  # =========================================================================
   # CORE HELPER FUNCTION TESTS
-  # ============================================================================
-
-  describe "persist_agent_state/2" do
-    test "persists state when both agent_id and conversation_id are present" do
-      socket = new_socket(%{agent_id: "test-agent", conversation_id: 123})
-
-      Sagents.AgentServer
-      |> expect(:export_state, fn agent_id ->
-        assert agent_id == "test-agent"
-        %{messages: [], todos: []}
-      end)
-
-      Conversations
-      |> expect(:save_agent_state, fn conv_id, state ->
-        assert conv_id == 123
-        assert state == %{messages: [], todos: []}
-        {:ok, %{}}
-      end)
-
-      result = AgentLiveHelpers.persist_agent_state(socket, "test_context")
-
-      # Should return socket unchanged
-      assert result == socket
-    end
-
-    test "skips persistence when conversation_id is missing" do
-      socket = new_socket(%{agent_id: "test-agent"})
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> raise "Should not be called" end)
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> raise "Should not be called" end)
-
-      result = AgentLiveHelpers.persist_agent_state(socket, "test_context")
-      assert result == socket
-    end
-
-    test "skips persistence when agent_id is missing" do
-      socket = new_socket(%{conversation_id: 123})
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> raise "Should not be called" end)
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> raise "Should not be called" end)
-
-      result = AgentLiveHelpers.persist_agent_state(socket, "test_context")
-      assert result == socket
-    end
-
-    test "handles database errors gracefully" do
-      socket = new_socket(%{agent_id: "test-agent", conversation_id: 123})
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> %{} end)
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> {:error, :database_error} end)
-
-      # Should not raise
-      result = AgentLiveHelpers.persist_agent_state(socket, "test_context")
-      assert result == socket
-    end
-
-    test "handles AgentServer exceptions gracefully" do
-      socket = new_socket(%{agent_id: "test-agent", conversation_id: 123})
-
-      Sagents.AgentServer
-      |> stub(:export_state, fn _ -> raise "Agent crashed" end)
-
-      Conversations
-      |> stub(:save_agent_state, fn _, _ -> raise "Should not be called" end)
-
-      # Should not raise
-      result = AgentLiveHelpers.persist_agent_state(socket, "test_context")
-      assert result == socket
-    end
-  end
+  # =========================================================================
 
   describe "update_streaming_message/2" do
     test "initializes streaming_delta with first delta" do
@@ -1048,7 +828,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
       |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
-      |> stub(:track_conversation_viewer, fn _, _, _ -> {:ok, :ref} end)
+      |> stub(:track_conversation_viewer, fn _, _ -> {:ok, :ref} end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
@@ -1154,10 +934,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
         assert conv_id == 123
         :ok
       end)
-      |> expect(:track_conversation_viewer, fn conv_id, user_id, pid ->
+      |> expect(:track_conversation_viewer, fn conv_id, user_id ->
         assert conv_id == 123
         assert user_id == 1
-        assert pid == self()
         {:ok, :ref}
       end)
 
@@ -1183,7 +962,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
       |> stub(:ensure_subscribed_to_conversation, fn _ -> raise "Should not be called" end)
-      |> stub(:track_conversation_viewer, fn _, _, _ -> raise "Should not be called" end)
+      |> stub(:track_conversation_viewer, fn _, _ -> raise "Should not be called" end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
@@ -1258,7 +1037,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
       |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
-      |> stub(:track_conversation_viewer, fn _, _, _ ->
+      |> stub(:track_conversation_viewer, fn _, _ ->
         {:error, {:already_tracked, :ref, :meta, :data}}
       end)
 

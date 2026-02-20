@@ -291,7 +291,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
       :ok = Coordinator.ensure_subscribed_to_conversation(conversation_id)
 
       if user_id do
-        case Coordinator.track_conversation_viewer(conversation_id, user_id, self()) do
+        case Coordinator.track_conversation_viewer(conversation_id, user_id) do
           {:ok, _ref} ->
             :ok
 
@@ -325,9 +325,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   Updates status, clears loading state and persists agent state.
   """
   def handle_status_idle(socket) do
-    # Persist agent state after successful completion
-    persist_agent_state(socket, "on_completion")
-
     socket
     |> assign(:loading, false)
     |> assign(:agent_status, :idle)
@@ -374,9 +371,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
         error_text
       )
 
-    # Persist agent state to preserve context up to the error
-    persist_agent_state(socket, "on_error")
-
     socket
     |> assign(:loading, false)
     |> assign(:agent_status, :error)
@@ -391,9 +385,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   """
   def handle_status_interrupted(socket, interrupt_data) do
     action_requests = Map.get(interrupt_data, :action_requests, [])
-
-    # Persist agent state to preserve context including the interrupt state
-    persist_agent_state(socket, "on_interrupt")
 
     socket
     |> assign(:loading, false)
@@ -483,88 +474,40 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   end
 
   @doc """
-  Handles tool execution started event.
+  Handles consolidated tool execution update event.
 
-  Updates database status to :executing and tracks the tool's execution status.
+  Updates streaming delta with tool execution status. No database calls —
+  persistence is handled by AgentServer via DisplayMessagePersistence.
   """
-  def handle_tool_execution_started(socket, tool_info) do
-    # Update database status
-    socket =
-      case Conversations.mark_tool_executing(tool_info.call_id) do
-        {:ok, updated_msg} ->
-          stream_insert(socket, :messages, updated_msg)
-
-        _ ->
-          socket
-      end
-
-    # Update delta with display_text and execution status
+  def handle_tool_execution_update(socket, status, tool_info) do
     current_delta = socket.assigns[:streaming_delta]
 
     updated_delta =
-      if current_delta do
-        current_delta
-        |> set_tool_display_text(tool_info.name, tool_info[:display_text])
-        |> set_tool_execution_status(tool_info.name, "executing")
-      else
-        current_delta
+      case {current_delta, status} do
+        {nil, _} ->
+          nil
+
+        {delta, :executing} ->
+          delta
+          |> set_tool_display_text(tool_info.name, tool_info[:display_text])
+          |> set_tool_execution_status(tool_info.name, "executing")
+
+        {_delta, _completed_or_failed} ->
+          # Tool finished — clear the streaming delta
+          nil
       end
 
     assign(socket, :streaming_delta, updated_delta)
   end
 
   @doc """
-  Handles tool execution completed event.
+  Handles display message updated event (from persistence layer).
 
-  Updates database with result metadata, clears streaming delta, and reloads
-  messages to show the completed status.
+  Updates the message in the stream — no DB call needed since the
+  updated record comes from the AgentServer broadcast.
   """
-  def handle_tool_execution_completed(socket, call_id, tool_result) do
-    result_metadata = %{"result" => inspect(tool_result)}
-
-    # Update database
-    case Conversations.complete_tool_call(call_id, result_metadata) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> :ok
-      {:error, reason} -> Logger.error("Failed to complete tool call: #{inspect(reason)}")
-    end
-
-    # Always reload to show completed status in the messages stream
-    socket =
-      if socket.assigns[:conversation_id] do
-        reload_messages_from_db(socket)
-      else
-        socket
-      end
-
-    assign(socket, :streaming_delta, nil)
-  end
-
-  @doc """
-  Handles tool execution failed event.
-
-  Updates database with error metadata, clears streaming delta, and reloads
-  messages to show the failed status.
-  """
-  def handle_tool_execution_failed(socket, call_id, error) do
-    # Update database
-    error_text = if is_binary(error), do: error, else: inspect(error)
-
-    case Conversations.fail_tool_call(call_id, %{"error" => error_text}) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> :ok
-      {:error, reason} -> Logger.error("Failed to mark tool call as failed: #{inspect(reason)}")
-    end
-
-    # Always reload to show failed status in the messages stream
-    socket =
-      if socket.assigns[:conversation_id] do
-        reload_messages_from_db(socket)
-      else
-        socket
-      end
-
-    assign(socket, :streaming_delta, nil)
+  def handle_display_message_updated(socket, updated_msg) do
+    stream_insert(socket, :messages, updated_msg)
   end
 
   # === LIFECYCLE HANDLERS ===
@@ -586,10 +529,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
     if agent_id == socket.assigns[:agent_id] && socket.assigns[:conversation] do
       case Conversations.update_conversation(socket.assigns.conversation, %{title: new_title}) do
         {:ok, updated_conversation} ->
-          # Persist agent state with new title in metadata
-          state_data = AgentServer.export_state(socket.assigns.agent_id)
-          Conversations.save_agent_state(socket.assigns.conversation_id, state_data)
-
+          # Agent state persistence is handled by AgentServer via AgentPersistence behaviour
           assign(socket, :conversation, updated_conversation)
 
         {:error, reason} ->
@@ -608,49 +548,11 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   via Coordinator.
   """
   def handle_agent_shutdown(socket, shutdown_data) do
-    Logger.info("Agent #{shutdown_data.agent_id} shutting down: #{shutdown_data.reason}")
+    Logger.info("Agent #{socket.assigns[:agent_id]} shutting down: #{shutdown_data.reason}")
     assign(socket, :agent_id, nil)
   end
 
   # === CORE HELPER FUNCTIONS ===
-
-  @doc """
-  Persists the current agent state to the database.
-
-  Context label is used for logging/debugging to indicate when the state
-  was persisted (e.g., "on_completion", "on_error", "on_interrupt").
-
-  Returns the socket unchanged - state persistence is a side effect.
-  """
-  def persist_agent_state(socket, context_label) do
-    if socket.assigns[:conversation_id] && socket.assigns[:agent_id] do
-      try do
-        state_data = AgentServer.export_state(socket.assigns.agent_id)
-
-        case Conversations.save_agent_state(socket.assigns.conversation_id, state_data) do
-          {:ok, _} ->
-            Logger.info(
-              "Persisted agent state for conversation #{socket.assigns.conversation_id} (#{context_label})"
-            )
-
-            socket
-
-          {:error, reason} ->
-            Logger.error("Failed to persist agent state (#{context_label}): #{inspect(reason)}")
-            socket
-        end
-      rescue
-        error ->
-          Logger.error(
-            "Exception while persisting agent state (#{context_label}): #{inspect(error)}"
-          )
-
-          socket
-      end
-    else
-      socket
-    end
-  end
 
   @doc """
   Accumulates streaming deltas into the current streaming message.
