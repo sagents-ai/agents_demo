@@ -11,7 +11,6 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistence do
 
   require Logger
 
-  alias AgentsDemo.Conversations
   alias Sagents.Message.DisplayHelpers
   alias LangChain.Message
 
@@ -37,7 +36,7 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistence do
             attrs
           end
 
-        case Conversations.append_display_message(conversation_id, attrs) do
+        case AgentsDemo.Conversations.append_display_message(conversation_id, attrs) do
           {:ok, display_msg} ->
             {:cont, {:ok, acc ++ [display_msg]}}
 
@@ -54,14 +53,14 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistence do
 
   @impl true
   def update_tool_status(:executing, %{call_id: call_id}) do
-    Conversations.mark_tool_executing(call_id)
+    AgentsDemo.Conversations.mark_tool_executing(call_id)
   end
 
   def update_tool_status(:completed, %{call_id: call_id, result: result}) do
-    Conversations.complete_tool_call(call_id, %{"result" => result})
+    AgentsDemo.Conversations.complete_tool_call(call_id, %{"result" => result})
   end
 
   def update_tool_status(:failed, %{call_id: call_id, error: error}) do
-    Conversations.fail_tool_call(call_id, %{"error" => error})
+    AgentsDemo.Conversations.fail_tool_call(call_id, %{"error" => error})
   end
 end

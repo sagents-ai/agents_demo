@@ -322,7 +322,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   @doc """
   Handles agent status change to :idle (execution completed successfully).
 
-  Updates status, clears loading state and persists agent state.
+  Updates status and clears loading state.
   """
   def handle_status_idle(socket) do
     socket
@@ -358,8 +358,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   @doc """
   Handles agent status change to :error (execution failed).
 
-  Formats error message, creates assistant message with error, updates status,
-  and persists agent state to preserve context up to the error.
+  Formats error message, creates assistant message with error, and updates status.
   """
   def handle_status_error(socket, reason) do
     error_text = format_error_message(reason)
@@ -380,8 +379,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   @doc """
   Handles agent status change to :interrupted (waiting for human approval).
 
-  Extracts action requests from interrupt data, updates status, and persists
-  agent state to preserve the interrupt context.
+  Extracts action requests from interrupt data and updates status.
   """
   def handle_status_interrupted(socket, interrupt_data) do
     action_requests = Map.get(interrupt_data, :action_requests, [])
