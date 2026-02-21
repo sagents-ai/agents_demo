@@ -8,20 +8,6 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
   3. TODOs appear in the LiveView assigns and UI
   4. Conversation title is generated
   5. Agent sends final response
-
-  ## Current Status
-
-  **NOTE**: This test currently FAILS and reproduces the TODO broadcasting bug.
-  The agent successfully executes the write_todos tool, but TODOs don't appear
-  in the LiveView assigns (expected: 6, actual: 0).
-
-  Root cause: The `clear_if_all_completed()` function in TodoList middleware
-  clears completed TODOs, and the broadcast comparison fails to detect changes
-  when going from empty [] to empty [].
-
-  See: TEST_TODOS_DEBUG.md for fix recommendations.
-
-  This test will PASS once the broadcasting logic is fixed.
   """
   use AgentsDemoWeb.ConnCase, async: false
   use Mimic
@@ -60,7 +46,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
         if System.monotonic_time(:millisecond) > deadline do
           {:timeout, current_status}
         else
-          Process.sleep(50)
+          Process.sleep(5)
           :continue
         end
       end
@@ -70,7 +56,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
 
   defp submit_message(view, message) do
     # Wait for input to be enabled (agent not running)
-    case wait_for_agent_status(view, :idle, 2000) do
+    case wait_for_agent_status(view, :idle, 100) do
       {:ok, _assigns} -> :ok
       {:timeout, status} -> Logger.warning("Timed out waiting for idle, got: #{inspect(status)}")
     end
@@ -186,7 +172,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       submit_message(view, "Create a project plan")
 
       # Wait for agent to complete execution
-      case wait_for_agent_status(view, :idle, 10_000) do
+      case wait_for_agent_status(view, :idle, 100) do
         {:ok, assigns} ->
           # Verify TODOs are present in assigns
           todos = assigns[:todos]
@@ -227,7 +213,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
           assert conversation_id != nil
 
           # Give title generation a moment to complete (it runs async)
-          Process.sleep(200)
+          Process.sleep(20)
 
           # Verify final message appears
           assert html =~ "I did it!"
@@ -279,7 +265,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       submit_message(view, "Create two tasks")
 
       # Wait for agent completion
-      {:ok, assigns} = wait_for_agent_status(view, :idle, 10_000)
+      {:ok, assigns} = wait_for_agent_status(view, :idle, 100)
 
       # Verify TODOs are present
       assert length(assigns[:todos]) == 2
@@ -292,7 +278,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       {:ok, new_view, _html} = live(conn, ~p"/chat?conversation_id=#{conversation_id}")
 
       # Wait for page to load
-      Process.sleep(100)
+      Process.sleep(10)
 
       # Verify TODOs are still present after reload
       reloaded_assigns = :sys.get_state(new_view.pid).socket.assigns
@@ -306,7 +292,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       # The Coordinator starts the agent on-demand when loading conversation
 
       # Give agent time to start and load state
-      Process.sleep(500)
+      Process.sleep(50)
 
       # Get updated assigns after agent startup
       final_assigns = :sys.get_state(new_view.pid).socket.assigns
@@ -326,7 +312,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
               assert Enum.any?(todos, &(&1.content == "Task 1"))
               assert Enum.any?(todos, &(&1.content == "Task 2"))
           after
-            2000 ->
+            100 ->
               flunk("Did not receive todos_updated event after page reload")
           end
         else
@@ -380,7 +366,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       end)
 
       submit_message(view, "Create initial tasks")
-      {:ok, assigns} = wait_for_agent_status(view, :idle, 10_000)
+      {:ok, assigns} = wait_for_agent_status(view, :idle, 100)
       assert length(assigns[:todos]) == 2
 
       # Second message: Update TODOs
@@ -417,7 +403,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       end)
 
       submit_message(view, "Mark first task complete")
-      {:ok, updated_assigns} = wait_for_agent_status(view, :idle, 10_000)
+      {:ok, updated_assigns} = wait_for_agent_status(view, :idle, 100)
 
       # Verify first task is now completed
       todos = updated_assigns[:todos]
@@ -462,7 +448,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       end)
 
       submit_message(view, "Create a task")
-      {:ok, assigns} = wait_for_agent_status(view, :idle, 10_000)
+      {:ok, assigns} = wait_for_agent_status(view, :idle, 100)
       assert length(assigns[:todos]) == 1
 
       # Second: simulate LLM error
@@ -473,7 +459,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       submit_message(view, "This will fail")
 
       # Wait for error state
-      case wait_for_agent_status(view, :error, 5_000) do
+      case wait_for_agent_status(view, :error, 100) do
         {:ok, error_assigns} ->
           # Verify TODOs are still present despite the error
           assert length(error_assigns[:todos]) == 1

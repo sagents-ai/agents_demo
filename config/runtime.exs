@@ -16,6 +16,12 @@ config :langchain, :anthropic_key, System.get_env("ANTHROPIC_API_KEY")
 # Example: 10 * 60 * 1000 = 10 minutes
 config :langchain, async_tool_timeout: :infinity
 
+# Sagents distributed process management (Horde)
+# Uses Horde.Registry and Horde.DynamicSupervisor for cross-node process
+# discovery and management. Requires nodes to be connected in an Erlang cluster.
+# Set to :local for non-Horde single-node mode (default if not configured).
+config :sagents, :distribution, :horde
+
 # ## Using releases
 #
 # If you use `mix release`, you need to explicitly enable the server

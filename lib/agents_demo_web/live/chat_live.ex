@@ -90,7 +90,7 @@ defmodule AgentsDemoWeb.ChatLive do
           # Untrack presence from previous conversation if connected
           if connected?(socket) && previous_conversation_id do
             user_id = socket.assigns.current_scope.user.id
-            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
+            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id)
             Logger.debug("Untracked presence from conversation #{previous_conversation_id}")
           end
 
@@ -103,7 +103,7 @@ defmodule AgentsDemoWeb.ChatLive do
           # Untrack presence when going back to empty state
           if connected?(socket) do
             user_id = socket.assigns.current_scope.user.id
-            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
+            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id)
             Logger.debug("Untracked presence from conversation #{previous_conversation_id}")
           end
 
@@ -215,7 +215,7 @@ defmodule AgentsDemoWeb.ChatLive do
     # sees viewer count drop to 0 and can trigger smart shutdown
     if previous_conversation_id && connected?(socket) do
       user_id = socket.assigns.current_scope.user.id
-      Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id, self())
+      Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id)
     end
 
     socket =
@@ -595,28 +595,18 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:tool_execution_started, tool_info}}, socket) do
+  def handle_info({:agent, {:tool_execution_update, status, tool_info}}, socket) do
     {:noreply,
      socket
-     |> AgentLiveHelpers.handle_tool_execution_started(tool_info)
+     |> AgentLiveHelpers.handle_tool_execution_update(status, tool_info)
      |> push_event("scroll-to-bottom", %{})}
   end
 
   @impl true
-  def handle_info({:agent, {:tool_execution_completed, call_id, tool_result}}, socket) do
+  def handle_info({:agent, {:display_message_updated, updated_msg}}, socket) do
     {:noreply,
      socket
-     |> AgentLiveHelpers.handle_tool_execution_completed(call_id, tool_result)
-     |> push_event("scroll-to-bottom", %{})}
-  end
-
-  @impl true
-  def handle_info({:agent, {:tool_execution_failed, call_id, error}}, socket) do
-    Logger.debug("Tool execution failed: #{call_id}")
-
-    {:noreply,
-     socket
-     |> AgentLiveHelpers.handle_tool_execution_failed(call_id, error)
+     |> AgentLiveHelpers.handle_display_message_updated(updated_msg)
      |> push_event("scroll-to-bottom", %{})}
   end
 
@@ -745,7 +735,7 @@ defmodule AgentsDemoWeb.ChatLive do
 
           # Track presence - this enables smart agent shutdown
           user_id = socket.assigns.current_scope.user.id
-          {:ok, _ref} = Coordinator.track_conversation_viewer(conversation.id, user_id, self())
+          {:ok, _ref} = Coordinator.track_conversation_viewer(conversation.id, user_id)
           Logger.debug("Tracking presence for conversation #{conversation.id}, user #{user_id}")
         end
 

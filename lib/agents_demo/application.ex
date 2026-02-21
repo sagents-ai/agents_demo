@@ -14,6 +14,10 @@ defmodule AgentsDemo.Application do
       {DNSCluster, query: Application.get_env(:agents_demo, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: AgentsDemo.PubSub},
       AgentsDemoWeb.Presence,
+      # Sagents infrastructure (registry + dynamic supervisors).
+      # Must be after Repo/PubSub so agents shut down before them (reverse order),
+      # allowing terminate/2 to persist state and broadcast shutdown events.
+      Sagents.Supervisor,
       # Start to serve requests, typically the last entry
       AgentsDemoWeb.Endpoint
     ]

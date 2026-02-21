@@ -10,4 +10,6 @@
 # Get your API key from: https://console.anthropic.com/
 export ANTHROPIC_API_KEY="your-api-key-here"
 
-
+# For local clustered usage
+export RELEASE_DISTRIBUTION="name"
+export RELEASE_COOKIE="my-app-cookie"
