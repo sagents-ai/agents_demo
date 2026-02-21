@@ -57,6 +57,7 @@ jobs:
     strategy:
       # Specify the OTP and Elixir versions to use when building
       # and running the workflow steps.
+      fail-fast: false
       matrix:
         include:
           - pair:
@@ -68,6 +69,13 @@ jobs:
             lint: lint
 
     steps:
+    - uses: actions/checkout@v5
+
+    - uses: erlef/setup-beam@v1
+      with:
+        elixir-version: "1.18"
+        otp-version: "28"
+
     # Step: Setup Elixir + Erlang image as the base.
     - name: Set up Elixir
       uses: erlef/setup-beam@v1
