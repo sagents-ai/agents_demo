@@ -41,12 +41,12 @@ defmodule AgentsDemo.MixProject do
   defp deps do
     [
       {:bcrypt_elixir, "~> 3.0"},
-      # {:langchain, "~> 0.5.2"},
+      {:langchain, "~> 0.6.0"},
       # {:langchain, path: "../my_langchain"},
       # {:sagents, path: "../sagents"},
       # {:sagents_live_debugger, path: "../sagents_live_debugger"},
-      {:sagents, "~> 0.2.0"},
-      {:sagents_live_debugger, "~> 0.2.0"},
+      {:sagents, "~> 0.2.1"},
+      {:sagents_live_debugger, "~> 0.2.1"},
       {:phoenix, "~> 1.8.1"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
