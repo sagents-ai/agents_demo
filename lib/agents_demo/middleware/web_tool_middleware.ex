@@ -242,9 +242,9 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
         # Result is a string - parse and validate it as JSON
         parse_and_validate_result(result)
 
-      {:interrupt, interrupt_data} ->
+      {:interrupt, message, interrupt_data} ->
         # Propagate interrupt (shouldn't happen for this subagent)
-        {:interrupt, interrupt_data}
+        {:interrupt, message, interrupt_data}
 
       {:error, reason} ->
         {:error, "Web lookup failed: #{inspect(reason)}"}
