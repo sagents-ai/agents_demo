@@ -8,11 +8,11 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   ## Usage
 
-      # Start or resume a conversation agent with explicit scope
-      scope = {:user, current_user.id}
+      # Start or resume a conversation agent with explicit filesystem scope
+      filesystem_scope = {:user, current_user.id}
       {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
         conversation_id,
-        scope: scope
+        filesystem_scope: filesystem_scope
       )
 
       # Subscribe to agent events
@@ -52,10 +52,10 @@ defmodule AgentsDemo.Agents.Coordinator do
       def handle_event("send_message", %{"message" => message_text}, socket) do
         conversation_id = socket.assigns.conversation_id
         user_id = socket.assigns.current_user.id
-        scope = {:user, user_id}
+        filesystem_scope = {:user, user_id}
 
-        # Start agent session with explicit scope
-        case AgentsDemo.Agents.Coordinator.start_conversation_session(conversation_id, scope: scope) do
+        # Start agent session with explicit filesystem scope
+        case AgentsDemo.Agents.Coordinator.start_conversation_session(conversation_id, filesystem_scope: filesystem_scope) do
           {:ok, session} ->
             # Create and add message to agent
             message = Message.new_user!(message_text)
@@ -119,7 +119,7 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   ## Options
 
-  - `:scope` - Required. Filesystem scope tuple (e.g., `{:user, user_id}`)
+  - `:filesystem_scope` - Required. Filesystem scope tuple (e.g., `{:user, user_id}`)
   - `:inactivity_timeout` - Milliseconds before agent stops (default: 10 minutes)
   - `:factory_opts` - Additional options passed to your Factory module (e.g., `:timezone` for custom middleware)
 
@@ -130,53 +130,55 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   ## Examples
 
-      # Standard usage - pass the scope explicitly
-      scope = {:user, current_user.id}
+      # Standard usage - pass the filesystem scope explicitly
+      filesystem_scope = {:user, current_user.id}
       {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
         conversation_id,
-        scope: scope
+        filesystem_scope: filesystem_scope
       )
 
       # Custom inactivity timeout (30 minutes)
       {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
         conversation_id,
-        scope: {:user, user_id},
+        filesystem_scope: {:user, user_id},
         inactivity_timeout: :timer.minutes(30)
       )
 
       # With custom factory options (e.g., for timezone-aware middleware)
       {:ok, session} = AgentsDemo.Agents.Coordinator.start_conversation_session(
         conversation_id,
-        scope: scope,
+        filesystem_scope: filesystem_scope,
         factory_opts: [timezone: "America/New_York"]
       )
 
   """
   def start_conversation_session(conversation_id, opts \\ []) do
-    # Validate required scope
-    scope =
-      case Keyword.fetch(opts, :scope) do
+    # Validate required filesystem scope
+    filesystem_scope =
+      case Keyword.fetch(opts, :filesystem_scope) do
         {:ok, scope_value} ->
           scope_value
 
         :error ->
           raise ArgumentError, """
-          Missing required :scope option.
+          Missing required :filesystem_scope option.
 
-          Please pass the scope to use for the filesystem when starting a session:
+          Please pass the filesystem scope when starting a session:
 
               AgentsDemo.Agents.Coordinator.start_conversation_session(
                 conversation_id,
-                scope: {:user, user_id}
+                filesystem_scope: {:user, user_id}
               )
           """
       end
+
+    user_scope = Keyword.get(opts, :user_scope)
 
     agent_id = conversation_agent_id(conversation_id)
 
     case AgentServer.get_pid(agent_id) do
       nil ->
-        do_start_session(conversation_id, agent_id, scope, opts)
+        do_start_session(conversation_id, agent_id, filesystem_scope, user_scope, opts)
 
       pid ->
         Logger.debug("Agent session already running for conversation #{conversation_id}")
@@ -409,9 +411,9 @@ defmodule AgentsDemo.Agents.Coordinator do
     "conversation:#{conversation_id}"
   end
 
-  defp do_start_session(conversation_id, agent_id, scope, opts) do
+  defp do_start_session(conversation_id, agent_id, filesystem_scope, user_scope, opts) do
     Logger.info(
-      "Starting agent session for conversation #{conversation_id} with scope #{inspect(scope)}"
+      "Starting agent session for conversation #{conversation_id} with filesystem_scope #{inspect(filesystem_scope)}"
     )
 
     # 1. Extract options
@@ -419,11 +421,12 @@ defmodule AgentsDemo.Agents.Coordinator do
     factory_opts = Keyword.get(opts, :factory_opts, [])
 
     # 2. Create agent from factory (configuration from code)
-    # Pass the explicit filesystem scope to the Factory
+    # Pass the explicit filesystem scope and user scope to the Factory
     merged_factory_opts =
       factory_opts
       |> Keyword.put(:agent_id, agent_id)
-      |> Keyword.put(:filesystem_scope, scope)
+      |> Keyword.put(:filesystem_scope, filesystem_scope)
+      |> Keyword.put(:user_scope, user_scope)
       |> Keyword.put(:timezone, timezone)
 
     {:ok, agent} = AgentsDemo.Agents.Factory.create_agent(merged_factory_opts)

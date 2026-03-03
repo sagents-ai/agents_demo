@@ -43,12 +43,18 @@ defmodule AgentsDemoWeb.UserLive.Registration do
               class="space-y-4"
             >
               <.input
+                field={@form[:first_name]}
+                type="text"
+                label="First name"
+                autocomplete="given-name"
+                phx-mounted={JS.focus()}
+              />
+              <.input
                 field={@form[:email]}
                 type="email"
                 label="Email"
                 autocomplete="username"
                 required
-                phx-mounted={JS.focus()}
               />
 
               <.button phx-disable-with="Creating account..." class="btn btn-primary w-full">

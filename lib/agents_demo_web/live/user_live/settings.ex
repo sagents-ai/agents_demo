@@ -30,6 +30,29 @@ defmodule AgentsDemoWeb.UserLive.Settings do
 
           <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg mb-6">
             <h2 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
+              Profile
+            </h2>
+            <.form
+              for={@profile_form}
+              id="profile_form"
+              phx-submit="update_profile"
+              phx-change="validate_profile"
+              class="space-y-4"
+            >
+              <.input
+                field={@profile_form[:first_name]}
+                type="text"
+                label="First name"
+                autocomplete="given-name"
+              />
+              <.button variant="primary" phx-disable-with="Saving...">
+                Save Profile
+              </.button>
+            </.form>
+          </div>
+
+          <div class="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 shadow-lg mb-6">
+            <h2 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
               Email Address
             </h2>
             <.form
@@ -125,14 +148,42 @@ defmodule AgentsDemoWeb.UserLive.Settings do
     email_changeset = Accounts.change_user_email(user, %{}, validate_unique: false)
     password_changeset = Accounts.change_user_password(user, %{}, hash_password: false)
 
+    profile_changeset = Accounts.change_user_profile(user, %{})
+
     socket =
       socket
       |> assign(:current_email, user.email)
+      |> assign(:profile_form, to_form(profile_changeset))
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_event("validate_profile", %{"user" => user_params}, socket) do
+    profile_form =
+      socket.assigns.current_scope.user
+      |> Accounts.change_user_profile(user_params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, profile_form: profile_form)}
+  end
+
+  def handle_event("update_profile", %{"user" => user_params}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Accounts.update_user_profile(user, user_params) do
+      {:ok, _user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Profile updated successfully.")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, profile_form: to_form(changeset, action: :insert))}
+    end
   end
 
   @impl true

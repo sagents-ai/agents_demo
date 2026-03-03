@@ -140,6 +140,7 @@ defmodule AgentsDemo.Agents.Factory do
   def create_agent(opts \\ []) do
     agent_id = Keyword.fetch!(opts, :agent_id)
     filesystem_scope = Keyword.fetch!(opts, :filesystem_scope)
+    user_scope = Keyword.get(opts, :user_scope)
     timezone = Keyword.get(opts, :timezone, "UTC")
     interrupt_on = Keyword.get(opts, :interrupt_on, default_interrupt_on())
 
@@ -148,7 +149,7 @@ defmodule AgentsDemo.Agents.Factory do
         agent_id: agent_id,
         model: get_model_config(),
         base_system_prompt: base_system_prompt(),
-        middleware: build_middleware(filesystem_scope, interrupt_on, timezone),
+        middleware: build_middleware(filesystem_scope, interrupt_on, timezone, user_scope),
         name: "Demo Agent",
         fallback_models: get_fallback_models(),
         before_fallback: get_before_fallback(),
@@ -371,7 +372,7 @@ defmodule AgentsDemo.Agents.Factory do
   # Order matters! Early middleware sees messages first (before_model) and
   # processes responses last (after_model).
   #
-  defp build_middleware(filesystem_scope, interrupt_on, timezone) do
+  defp build_middleware(filesystem_scope, interrupt_on, timezone, user_scope) do
     [
       # Task management - gives the agent a todo list for tracking work
       Sagents.Middleware.TodoList,
@@ -398,10 +399,14 @@ defmodule AgentsDemo.Agents.Factory do
          block_middleware: [
            AgentsDemo.Middleware.WebToolMiddleware,
            AgentsDemo.Middleware.InjectCurrentTime,
+           AgentsDemo.Middleware.UserContextMiddleware,
            Sagents.Middleware.Summarization,
            Sagents.Middleware.ConversationTitle
          ]
        ]},
+
+      # Inject the user's first name into the first user message
+      {AgentsDemo.Middleware.UserContextMiddleware, [scope: user_scope]},
 
       # Custom middleware that injects the current time into every user message
       {InjectCurrentTime, [timezone: timezone]},

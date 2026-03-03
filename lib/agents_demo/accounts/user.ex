@@ -3,6 +3,7 @@ defmodule AgentsDemo.Accounts.User do
   import Ecto.Changeset
 
   schema "users" do
+    field :first_name, :string
     field :email, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
@@ -25,7 +26,7 @@ defmodule AgentsDemo.Accounts.User do
   """
   def email_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:email])
+    |> cast(attrs, [:email, :first_name])
     |> validate_email(opts)
   end
 
@@ -128,5 +129,13 @@ defmodule AgentsDemo.Accounts.User do
   def valid_password?(_, _) do
     Bcrypt.no_user_verify()
     false
+  end
+
+  @doc """
+  A user changeset for updating profile fields (e.g., first_name).
+  """
+  def profile_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:first_name])
   end
 end

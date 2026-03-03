@@ -141,7 +141,8 @@ defmodule AgentsDemoWeb.ChatLive do
       # Ensure agent is running (seamless start if not)
       # Coordinator.start_conversation_session is idempotent
       case Coordinator.start_conversation_session(conversation_id,
-             scope: filesystem_scope,
+             filesystem_scope: filesystem_scope,
+             user_scope: socket.assigns.current_scope,
              timezone: timezone
            ) do
         {:ok, session} ->
@@ -469,7 +470,8 @@ defmodule AgentsDemoWeb.ChatLive do
     # This loads the saved agent state into memory without executing
     # Once started, the agent will broadcast status changes and the button will disappear
     case Coordinator.start_conversation_session(conversation_id,
-           scope: filesystem_scope,
+           filesystem_scope: filesystem_scope,
+           user_scope: socket.assigns.current_scope,
            timezone: timezone
          ) do
       {:ok, session} ->
