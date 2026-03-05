@@ -374,64 +374,14 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("approve_tool", %{"index" => index_str}, socket) do
-    index = String.to_integer(index_str)
-    pending_tools = socket.assigns.pending_tools
-
-    # Real mode: approve just this one tool
-    decisions = [%{type: :approve}]
-    # Remove the approved tool from pending list
-    remaining_tools = List.delete_at(pending_tools, index)
-
-    Logger.info("Approving tool at index #{index}")
-    Logger.debug("Decision: #{inspect(decisions)}")
-
-    # Resume the agent with the decision for just this tool
-    case AgentServer.resume(socket.assigns.agent_id, decisions) do
-      :ok ->
-        {:noreply,
-         socket
-         |> assign(:agent_status, :running)
-         |> assign(:loading, true)
-         |> assign(:pending_tools, remaining_tools)
-         |> assign(:interrupt_data, nil)
-         |> put_flash(:info, "Tool approved - agent resuming")}
-
-      {:error, reason} ->
-        Logger.error("Failed to resume agent: #{inspect(reason)}")
-        error_msg = "Failed to resume agent: #{inspect(reason)}"
-        {:noreply, put_flash(socket, :error, error_msg)}
-    end
+    {:noreply,
+     AgentLiveHelpers.handle_hitl_decision(socket, String.to_integer(index_str), :approve)}
   end
 
   @impl true
   def handle_event("reject_tool", %{"index" => index_str}, socket) do
-    index = String.to_integer(index_str)
-    pending_tools = socket.assigns.pending_tools
-
-    # Real mode: reject just this one tool
-    decisions = [%{type: :reject}]
-    # Remove the approved tool from pending list
-    remaining_tools = List.delete_at(pending_tools, index)
-
-    Logger.info("Rejecting tool at index #{index}")
-    Logger.debug("Decision: #{inspect(decisions)}")
-
-    # Resume the agent with the decision for just this tool
-    case AgentServer.resume(socket.assigns.agent_id, decisions) do
-      :ok ->
-        {:noreply,
-         socket
-         |> assign(:agent_status, :running)
-         |> assign(:loading, true)
-         |> assign(:pending_tools, remaining_tools)
-         |> assign(:interrupt_data, nil)
-         |> put_flash(:info, "Tool rejected - agent resuming")}
-
-      {:error, reason} ->
-        Logger.error("Failed to resume agent: #{inspect(reason)}")
-        error_msg = "Failed to resume agent: #{inspect(reason)}"
-        {:noreply, put_flash(socket, :error, error_msg)}
-    end
+    {:noreply,
+     AgentLiveHelpers.handle_hitl_decision(socket, String.to_integer(index_str), :reject)}
   end
 
   @impl true
@@ -814,6 +764,7 @@ defmodule AgentsDemoWeb.ChatLive do
           streaming_delta={@streaming_delta}
           agent_status={@agent_status}
           pending_tools={@pending_tools}
+          interrupt_data={@interrupt_data}
           current_scope={@current_scope}
           conversation_id={@conversation_id}
           has_more_conversations={@has_more_conversations}

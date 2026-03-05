@@ -173,30 +173,24 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.loading == false
     end
 
-    test "formats error message for LangChainError" do
-      socket = new_socket(%{conversation_id: 123}, [:messages])
+    test "shows flash with formatted error for LangChainError" do
+      socket = new_socket(%{conversation_id: 123})
 
       error = %LangChain.LangChainError{message: "API rate limit exceeded"}
 
-      Conversations
-      |> expect(:append_text_message, fn _conv_id, _type, text ->
-        assert text =~ "API rate limit exceeded"
-        {:ok, %{id: 1}}
-      end)
+      result = AgentLiveHelpers.handle_status_error(socket, error)
 
-      AgentLiveHelpers.handle_status_error(socket, error)
+      flash = result.assigns.flash
+      assert flash["error"] =~ "API rate limit exceeded"
     end
 
-    test "formats error message for generic error" do
-      socket = new_socket(%{conversation_id: 123}, [:messages])
+    test "shows flash with formatted error for generic error" do
+      socket = new_socket(%{conversation_id: 123})
 
-      Conversations
-      |> expect(:append_text_message, fn _conv_id, _type, text ->
-        assert text =~ "some_error"
-        {:ok, %{id: 1}}
-      end)
+      result = AgentLiveHelpers.handle_status_error(socket, :some_error)
 
-      AgentLiveHelpers.handle_status_error(socket, :some_error)
+      flash = result.assigns.flash
+      assert flash["error"] =~ "some_error"
     end
   end
 

@@ -351,6 +351,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :input, :string, doc: "The user input being drafted for a new message"
   attr :agent_status, :atom, default: nil
   attr :pending_tools, :list, default: []
+  attr :interrupt_data, :map, default: nil
   attr :current_scope, :any, default: nil
   attr :conversation_id, :string, default: nil
   attr :has_more_conversations, :boolean, default: false
@@ -382,10 +383,10 @@ defmodule AgentsDemoWeb.ChatComponents do
             <button
               phx-click="toggle_debug_mode"
               class={[
-                "p-2 rounded transition-colors",
+                "p-2 rounded-md border-none transition-colors",
                 @debug_mode && "bg-purple-600 text-white hover:bg-purple-700",
                 !@debug_mode &&
-                  "bg-transparent text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  "bg-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)]"
               ]}
               type="button"
               title={
@@ -399,7 +400,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
             <button
               phx-click="toggle_thread_history"
-              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
+              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-colors"
               type="button"
               title="Thread History"
             >
@@ -408,7 +409,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
             <button
               phx-click="new_thread"
-              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors"
+              class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-colors"
               type="button"
               title="New Thread"
             >
@@ -423,7 +424,7 @@ defmodule AgentsDemoWeb.ChatComponents do
               </span>
               <.link
                 href={~p"/users/settings"}
-                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors no-underline inline-flex items-center justify-center"
+                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-colors no-underline inline-flex items-center justify-center"
                 title="Settings"
               >
                 <.icon name="hero-cog-6-tooth" class="w-5 h-5" />
@@ -431,7 +432,7 @@ defmodule AgentsDemoWeb.ChatComponents do
               <.link
                 href={~p"/users/log-out"}
                 method="delete"
-                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:bg-[var(--color-border-light)] transition-colors no-underline inline-flex items-center justify-center"
+                class="p-2 bg-transparent border-none text-[var(--color-text-secondary)] rounded-md hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-colors no-underline inline-flex items-center justify-center"
                 title="Log out"
               >
                 <.icon name="hero-arrow-right-on-rectangle" class="w-5 h-5" />
@@ -496,7 +497,11 @@ defmodule AgentsDemoWeb.ChatComponents do
           </div>
 
           <%= if @agent_status == :interrupted && @pending_tools != [] do %>
-            <.tool_approval_prompt pending_tools={@pending_tools} />
+            <.tool_approval_prompt
+              pending_tools={@pending_tools}
+              interrupt_data={@interrupt_data}
+              debug_mode={@debug_mode}
+            />
           <% end %>
         </div>
       </div>
@@ -562,6 +567,8 @@ defmodule AgentsDemoWeb.ChatComponents do
             name={get_in(@message.content, ["name"])}
             content={get_in(@message.content, ["content"])}
             is_error={get_in(@message.content, ["is_error"]) || false}
+            is_interrupt={get_in(@message.content, ["is_interrupt"]) || false}
+            hitl_decision={get_in(@message.content, ["hitl_decision"])}
           />
         <% end %>
       <% _other -> %>
@@ -657,17 +664,27 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   # Normal user view - friendly display
   defp tool_call_normal_view(assigns) do
+    # Prefer metadata display_text (set during status updates) over content display_text
     display_text =
-      get_in(assigns.message.content, ["display_text"]) ||
-        get_in(assigns.message.metadata, ["display_text"]) ||
+      get_in(assigns.message.metadata, ["display_text"]) ||
+        get_in(assigns.message.content, ["display_text"]) ||
         friendly_fallback(get_in(assigns.message.content, ["name"]))
 
-    # Build icon class string based on status
+    hitl_decision = get_in(assigns.message.metadata, ["hitl_decision"])
+
+    # Treat HITL-rejected tools differently from actual execution failures
+    effective_status =
+      if assigns.message.status == "failed" && hitl_decision == "rejected",
+        do: "rejected",
+        else: assigns.message.status
+
     icon_class =
-      case assigns.message.status do
+      case effective_status do
         "executing" -> "w-5 h-5 text-blue-500 animate-spin"
         "completed" -> "w-5 h-5 text-green-600 dark:text-green-500"
         "failed" -> "w-5 h-5 text-red-600 dark:text-red-500"
+        "rejected" -> "w-5 h-5 text-orange-600 dark:text-orange-500"
+        "interrupted" -> "w-5 h-5 text-yellow-600 dark:text-yellow-500"
         _ -> "w-5 h-5 text-gray-400"
       end
 
@@ -675,15 +692,23 @@ defmodule AgentsDemoWeb.ChatComponents do
       assigns
       |> assign(:display_text, display_text)
       |> assign(:icon_class, icon_class)
+      |> assign(:hitl_decision, hitl_decision)
+      |> assign(:effective_status, effective_status)
 
     ~H"""
-    <div class="flex items-center gap-2 ml-1 pl-3 pr-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded">
+    <div class={[
+      "flex items-center gap-2 ml-1 pl-3 pr-4 py-2 border-l-4 rounded",
+      @effective_status == "interrupted" && "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-500",
+      @effective_status != "interrupted" && "bg-blue-50 dark:bg-blue-900/20 border-blue-500"
+    ]}>
       <.icon
         name={
           cond do
-            @message.status == "executing" -> "hero-cog-6-tooth"
-            @message.status == "completed" -> "hero-check-circle"
-            @message.status == "failed" -> "hero-x-circle"
+            @effective_status == "executing" -> "hero-cog-6-tooth"
+            @effective_status == "completed" -> "hero-check-circle"
+            @effective_status == "failed" -> "hero-x-circle"
+            @effective_status == "rejected" -> "hero-no-symbol"
+            @effective_status == "interrupted" -> "hero-hand-raised"
             true -> "hero-ellipsis-horizontal-circle"
           end
         }
@@ -691,13 +716,29 @@ defmodule AgentsDemoWeb.ChatComponents do
       />
       <span class="text-sm text-gray-700 dark:text-gray-300">
         {@display_text}
-        <%= if @message.status == "executing" do %>
+        <%= if @effective_status == "executing" do %>
           <span class="inline-block ml-1 text-blue-500">...</span>
         <% end %>
       </span>
 
-      <span :if={@message.status == "failed"} class="text-xs text-red-600 dark:text-red-400 ml-auto">
+      <span
+        :if={@effective_status == "failed"}
+        class="text-[10px] font-medium tracking-wide uppercase ml-auto px-2 py-0.5 rounded-full text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30"
+      >
         Failed
+      </span>
+
+      <span
+        :if={@hitl_decision}
+        class={[
+          "text-[10px] font-medium tracking-wide uppercase ml-auto px-2 py-0.5 rounded-full",
+          @hitl_decision == "approved" &&
+            "text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30",
+          @hitl_decision == "rejected" &&
+            "text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30"
+        ]}
+      >
+        {if @hitl_decision == "approved", do: "Approved", else: "Declined"}
       </span>
     </div>
     """
@@ -714,18 +755,22 @@ defmodule AgentsDemoWeb.ChatComponents do
 
     assigns = assign(assigns, :is_failed, assigns.message.status == "failed")
     assigns = assign(assigns, :is_executing, assigns.message.status == "executing")
+    assigns = assign(assigns, :is_interrupted, assigns.message.status == "interrupted")
 
     ~H"""
     <div class={[
       "border rounded-lg p-3",
       @is_failed && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
-      !@is_failed && "bg-blue-50/30 dark:bg-blue-950/10 border-blue-200/50 dark:border-blue-900/30"
+      @is_interrupted && "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-900",
+      !@is_failed && !@is_interrupted &&
+        "bg-blue-50/30 dark:bg-blue-950/10 border-blue-200/50 dark:border-blue-900/30"
     ]}>
       <div class="flex items-center gap-2 mb-2">
         <.icon
           name={
             cond do
               @is_failed -> "hero-exclamation-triangle"
+              @is_interrupted -> "hero-hand-raised"
               @is_executing -> "hero-arrow-path"
               true -> "hero-check-circle"
             end
@@ -733,6 +778,7 @@ defmodule AgentsDemoWeb.ChatComponents do
           class={
             cond do
               @is_failed -> "w-4 h-4 text-red-600"
+              @is_interrupted -> "w-4 h-4 text-yellow-600"
               @is_executing -> "w-4 h-4 text-blue-600 animate-spin"
               true -> "w-4 h-4 text-green-600"
             end
@@ -741,7 +787,8 @@ defmodule AgentsDemoWeb.ChatComponents do
         <span class={[
           "text-sm font-semibold",
           @is_failed && "text-red-700 dark:text-red-400",
-          !@is_failed && "text-blue-700 dark:text-blue-400"
+          @is_interrupted && "text-yellow-700 dark:text-yellow-400",
+          !@is_failed && !@is_interrupted && "text-blue-700 dark:text-blue-400"
         ]}>
           Tool Call: {get_in(@message.content, ["name"])}
         </span>
@@ -794,29 +841,61 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :name, :string, required: true
   attr :content, :string, required: true
   attr :is_error, :boolean, default: false
+  attr :is_interrupt, :boolean, default: false
+  attr :hitl_decision, :string, default: nil
 
   # Component: Tool Result Display (for DisplayMessage content)
-  # Completion action theme - green tint for success, red for errors
+  # Completion action theme - green for success, red for errors, yellow/amber for interrupts
   def tool_result_display(assigns) do
+    assigns = assign(assigns, :is_rejected, assigns.hitl_decision == "rejected")
+
     ~H"""
     <div>
       <div class={[
         "border rounded-lg p-3 ml-2",
-        @is_error && "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
-        !@is_error &&
+        @is_interrupt &&
+          "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-900",
+        @is_rejected && !@is_interrupt &&
+          "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900",
+        @is_error && !@is_interrupt && !@is_rejected &&
+          "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900",
+        !@is_error && !@is_interrupt && !@is_rejected &&
           "bg-green-50/30 dark:bg-green-950/10 border-green-200/50 dark:border-green-900/30"
       ]}>
         <div class="flex items-center gap-2 mb-2">
           <.icon
-            name={if @is_error, do: "hero-exclamation-triangle", else: "hero-check-circle"}
-            class={if @is_error, do: "w-4 h-4 text-red-600", else: "w-4 h-4 text-green-600"}
+            name={
+              cond do
+                @is_interrupt -> "hero-hand-raised"
+                @is_rejected -> "hero-no-symbol"
+                @is_error -> "hero-exclamation-triangle"
+                true -> "hero-check-circle"
+              end
+            }
+            class={
+              cond do
+                @is_interrupt -> "w-4 h-4 text-yellow-600"
+                @is_rejected -> "w-4 h-4 text-orange-600"
+                @is_error -> "w-4 h-4 text-red-600"
+                true -> "w-4 h-4 text-green-600"
+              end
+            }
           />
           <span class={[
             "text-sm font-semibold",
-            @is_error && "text-red-700 dark:text-red-400",
-            !@is_error && "text-green-700 dark:text-green-400"
+            @is_interrupt && "text-yellow-700 dark:text-yellow-400",
+            @is_rejected && !@is_interrupt && "text-orange-700 dark:text-orange-400",
+            @is_error && !@is_interrupt && !@is_rejected && "text-red-700 dark:text-red-400",
+            !@is_error && !@is_interrupt && !@is_rejected && "text-green-700 dark:text-green-400"
           ]}>
-            Tool Result: {@name}
+            <%= cond do %>
+              <% @is_interrupt -> %>
+                Tool Interrupted: {@name}
+              <% @is_rejected -> %>
+                Declined: {@name}
+              <% true -> %>
+                Tool Result: {@name}
+            <% end %>
           </span>
         </div>
         <div class="pl-6 text-[var(--color-text-secondary)]">
@@ -1020,11 +1099,15 @@ defmodule AgentsDemoWeb.ChatComponents do
   end
 
   attr :pending_tools, :list, required: true
+  attr :interrupt_data, :map, default: nil
   attr :test_mode, :boolean, default: false
+  attr :debug_mode, :boolean, default: false
 
   # Component: Tool Approval Prompt
   def tool_approval_prompt(assigns) do
     pending_count = Enum.count(assigns.pending_tools)
+    is_subagent = match?(%{type: :subagent_hitl}, assigns.interrupt_data)
+    subagent_type = if is_subagent, do: assigns.interrupt_data[:subagent_type], else: nil
 
     # Only show the first tool, with a counter
     assigns =
@@ -1032,6 +1115,8 @@ defmodule AgentsDemoWeb.ChatComponents do
       |> assign(:current_tool, List.first(assigns.pending_tools))
       |> assign(:total_count, pending_count)
       |> assign(:remaining_count, pending_count - 1)
+      |> assign(:is_subagent, is_subagent)
+      |> assign(:subagent_type, subagent_type)
 
     ~H"""
     <div class="px-6 py-4 border-t-2 border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20">
@@ -1045,6 +1130,11 @@ defmodule AgentsDemoWeb.ChatComponents do
             <h3 class="text-lg font-bold text-yellow-900 dark:text-yellow-100 m-0">
               Human Approval Required
             </h3>
+            <%= if @is_subagent do %>
+              <span class="px-2.5 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 text-xs font-bold rounded-full border border-purple-300 dark:border-purple-700">
+                Sub-agent: {@subagent_type}
+              </span>
+            <% end %>
           </div>
           <div class="flex items-center gap-2">
             <%= if @remaining_count > 0 do %>
@@ -1065,13 +1155,13 @@ defmodule AgentsDemoWeb.ChatComponents do
             <strong>Test Mode:</strong>
             The agent wants to execute this tool. This is a mock request for UI testing - clicking approve/reject will only update the display.
           <% else %>
-            The agent wants to execute this tool. Please review and approve or reject this action:
+            The assistant wants to perform this action. Please review and approve or reject:
           <% end %>
         </p>
 
         <%!-- Show only the first tool (index 0) --%>
         <%= if @current_tool do %>
-          <.tool_approval_item tool={@current_tool} index={0} />
+          <.tool_approval_item tool={@current_tool} index={0} debug_mode={@debug_mode} />
         <% end %>
       </div>
     </div>
@@ -1080,10 +1170,18 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   attr :tool, :map, required: true
   attr :index, :integer, required: true
+  attr :debug_mode, :boolean, default: false
 
   # Component: Individual Tool Approval Item
   def tool_approval_item(assigns) do
-    assigns = assign(assigns, :args_json, format_tool_arguments(assigns.tool.arguments))
+    display_name =
+      assigns.tool[:display_text] ||
+        friendly_fallback(assigns.tool.tool_name)
+
+    assigns =
+      assigns
+      |> assign(:display_name, display_name)
+      |> assign(:args_json, format_tool_arguments(assigns.tool.arguments))
 
     ~H"""
     <div class="bg-white dark:bg-gray-800 border-2 border-yellow-300 dark:border-yellow-700 rounded-lg p-4 shadow-sm">
@@ -1094,17 +1192,14 @@ defmodule AgentsDemoWeb.ChatComponents do
             class="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0"
           />
           <span class="text-lg font-bold text-gray-900 dark:text-gray-100">
-            {@tool.tool_name}
+            {if @debug_mode, do: @tool.tool_name, else: @display_name}
           </span>
         </div>
 
-        <%= if @args_json && @args_json != "{}" do %>
-          <details class="mt-1" open>
-            <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 mb-2">
-              Arguments
-            </summary>
-            <pre class="mt-2 p-3 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-800 dark:text-gray-200 overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono"><code>{@args_json}</code></pre>
-          </details>
+        <%= if @debug_mode do %>
+          <.tool_approval_args_debug args_json={@args_json} />
+        <% else %>
+          <.tool_approval_args_friendly arguments={@tool.arguments} />
         <% end %>
 
         <div class="flex items-center justify-end gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -1129,6 +1224,92 @@ defmodule AgentsDemoWeb.ChatComponents do
     </div>
     """
   end
+
+  # Debug view: raw JSON arguments (existing behavior)
+  attr :args_json, :string, required: true
+
+  defp tool_approval_args_debug(assigns) do
+    ~H"""
+    <%= if @args_json && @args_json != "{}" do %>
+      <details class="mt-1" open>
+        <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 mb-2">
+          Arguments
+        </summary>
+        <pre class="mt-2 p-3 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-800 dark:text-gray-200 overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono"><code>{@args_json}</code></pre>
+      </details>
+    <% end %>
+    """
+  end
+
+  # Friendly view: key-value list with humanized labels
+  attr :arguments, :map, default: %{}
+
+  defp tool_approval_args_friendly(assigns) do
+    args = assigns.arguments || %{}
+
+    formatted_args =
+      args
+      |> Enum.sort_by(fn {k, _v} -> k end)
+      |> Enum.map(fn {key, value} ->
+        %{
+          label: humanize_arg_key(key),
+          value: value,
+          long?: is_binary(value) and String.length(value) > 120
+        }
+      end)
+
+    assigns = assign(assigns, :formatted_args, formatted_args)
+
+    ~H"""
+    <%= if @formatted_args != [] do %>
+      <div class="mt-1 space-y-2">
+        <div :for={arg <- @formatted_args} class="flex flex-col gap-0.5">
+          <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            {arg.label}
+          </span>
+          <%= if arg.long? do %>
+            <details class="group">
+              <summary class="cursor-pointer text-sm text-gray-800 dark:text-gray-200">
+                <span class="font-mono text-sm">{String.slice(to_string(arg.value), 0, 120)}...</span>
+                <span class="text-xs text-blue-600 dark:text-blue-400 ml-1 group-open:hidden">
+                  Show more
+                </span>
+              </summary>
+              <pre class="mt-1 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-800 dark:text-gray-200 overflow-x-auto border border-gray-200 dark:border-gray-700 font-mono whitespace-pre-wrap">{arg.value}</pre>
+            </details>
+          <% else %>
+            <span class="font-mono text-sm text-gray-800 dark:text-gray-200 break-all">
+              {format_arg_value(arg.value)}
+            </span>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  defp humanize_arg_key(key) when is_binary(key) do
+    key
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp humanize_arg_key(key), do: to_string(key)
+
+  defp format_arg_value(value) when is_binary(value), do: value
+  defp format_arg_value(value) when is_boolean(value), do: to_string(value)
+  defp format_arg_value(value) when is_number(value), do: to_string(value)
+  defp format_arg_value(value) when is_list(value), do: Enum.join(value, ", ")
+
+  defp format_arg_value(value) when is_map(value) do
+    case Jason.encode(value, pretty: true) do
+      {:ok, json} -> json
+      _ -> inspect(value)
+    end
+  end
+
+  defp format_arg_value(nil), do: ""
+  defp format_arg_value(value), do: inspect(value)
 
   defp mdex_config(md_content) do
     [

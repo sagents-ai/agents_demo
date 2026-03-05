@@ -49,7 +49,9 @@ defmodule AgentsDemo.Middleware.UserContextMiddleware do
     last = List.last(messages)
 
     if last && last.role == :user && !has_prior_user_message?(messages) do
-      context_text = "<user_information>The user's first name is #{first_name}.</user_information>\n\n"
+      context_text =
+        "<user_information>The user's first name is #{first_name}.</user_information>\n\n"
+
       updated = %{last | content: prepend_context(last.content, context_text)}
       %{state | messages: List.replace_at(messages, -1, updated)}
     else
