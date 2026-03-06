@@ -521,35 +521,51 @@ defmodule AgentsDemoWeb.ChatComponents do
           autocomplete="off"
           disabled={@agent_status in [:running, :interrupted]}
         />
-        <%= cond do %>
-          <% @agent_status == :running -> %>
-            <button
-              type="button"
-              phx-click="cancel_agent"
-              class="px-5 py-3.5 bg-red-600 text-white border-none rounded-xl hover:bg-red-700 hover:shadow-lg transition-all flex items-center justify-center min-w-[56px] shadow-md"
-              title="Stop agent"
-            >
-              <.icon name="hero-stop" class="w-5 h-5" />
-            </button>
-          <% @agent_status == :interrupted -> %>
-            <button
-              type="submit"
-              disabled
-              class="px-5 py-3.5 bg-[var(--color-user-message)] text-white border-none rounded-xl flex items-center justify-center opacity-50 cursor-not-allowed min-w-[56px] shadow-md"
-            >
-              <.icon name="hero-paper-airplane" class="w-5 h-5" />
-            </button>
-          <% true -> %>
-            <button
-              type="submit"
-              class="px-5 py-3.5 bg-[var(--color-user-message)] text-white border-none rounded-xl hover:opacity-90 hover:shadow-lg transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed min-w-[56px] shadow-md"
-              disabled={@input == ""}
-            >
-              <.icon name="hero-paper-airplane" class="w-5 h-5" />
-            </button>
-        <% end %>
+        <.chat_submit_button agent_status={@agent_status} input={@input} />
       </form>
     </div>
+    """
+  end
+
+  attr :agent_status, :atom, default: nil
+  attr :input, :string, default: ""
+
+  defp chat_submit_button(assigns) do
+    {type, icon, classes, disabled} =
+      case assigns.agent_status do
+        :running ->
+          {"button", "hero-stop",
+           "bg-red-600 hover:bg-red-700 hover:shadow-lg transition-all",
+           false}
+
+        :interrupted ->
+          {"submit", "hero-paper-airplane",
+           "bg-[var(--color-user-message)] opacity-50 cursor-not-allowed",
+           true}
+
+        _ ->
+          {"submit", "hero-paper-airplane",
+           "bg-[var(--color-user-message)] hover:opacity-90 hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+           assigns.input == ""}
+      end
+
+    assigns =
+      assigns
+      |> assign(:button_type, type)
+      |> assign(:icon, icon)
+      |> assign(:classes, classes)
+      |> assign(:disabled, disabled)
+
+    ~H"""
+    <button
+      type={@button_type}
+      phx-click={if @agent_status == :running, do: "cancel_agent"}
+      title={if @agent_status == :running, do: "Stop agent"}
+      class={["px-5 py-3.5 text-white border-none rounded-xl flex items-center justify-center min-w-[56px] shadow-md", @classes]}
+      disabled={@disabled}
+    >
+      <.icon name={@icon} class="w-5 h-5" />
+    </button>
     """
   end
 
