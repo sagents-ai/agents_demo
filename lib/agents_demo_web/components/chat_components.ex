@@ -516,28 +516,37 @@ defmodule AgentsDemoWeb.ChatComponents do
           value={@input}
           phx-change="update_input"
           phx-debounce="300"
-          placeholder="Type your message..."
+          placeholder={if @agent_status == :interrupted, do: "Approve or reject pending tools first...", else: "Type your message..."}
           class="flex-1 px-5 py-3.5 border-2 border-[var(--color-border)] rounded-xl bg-white dark:bg-[var(--color-surface)] text-[var(--color-text-primary)] text-base outline-none focus:border-[var(--color-user-message)] focus:ring-4 focus:ring-[var(--color-user-message)]/10 hover:border-[var(--color-text-tertiary)] transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           autocomplete="off"
-          disabled={@agent_status == :running}
+          disabled={@agent_status in [:running, :interrupted]}
         />
-        <%= if @agent_status == :running do %>
-          <button
-            type="button"
-            phx-click="cancel_agent"
-            class="px-5 py-3.5 bg-red-600 text-white border-none rounded-xl hover:bg-red-700 hover:shadow-lg transition-all flex items-center justify-center min-w-[56px] shadow-md"
-            title="Stop agent"
-          >
-            <.icon name="hero-stop" class="w-5 h-5" />
-          </button>
-        <% else %>
-          <button
-            type="submit"
-            class="px-5 py-3.5 bg-[var(--color-user-message)] text-white border-none rounded-xl hover:opacity-90 hover:shadow-lg transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed min-w-[56px] shadow-md"
-            disabled={@input == ""}
-          >
-            <.icon name="hero-paper-airplane" class="w-5 h-5" />
-          </button>
+        <%= cond do %>
+          <% @agent_status == :running -> %>
+            <button
+              type="button"
+              phx-click="cancel_agent"
+              class="px-5 py-3.5 bg-red-600 text-white border-none rounded-xl hover:bg-red-700 hover:shadow-lg transition-all flex items-center justify-center min-w-[56px] shadow-md"
+              title="Stop agent"
+            >
+              <.icon name="hero-stop" class="w-5 h-5" />
+            </button>
+          <% @agent_status == :interrupted -> %>
+            <button
+              type="submit"
+              disabled
+              class="px-5 py-3.5 bg-[var(--color-user-message)] text-white border-none rounded-xl flex items-center justify-center opacity-50 cursor-not-allowed min-w-[56px] shadow-md"
+            >
+              <.icon name="hero-paper-airplane" class="w-5 h-5" />
+            </button>
+          <% true -> %>
+            <button
+              type="submit"
+              class="px-5 py-3.5 bg-[var(--color-user-message)] text-white border-none rounded-xl hover:opacity-90 hover:shadow-lg transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed min-w-[56px] shadow-md"
+              disabled={@input == ""}
+            >
+              <.icon name="hero-paper-airplane" class="w-5 h-5" />
+            </button>
         <% end %>
       </form>
     </div>
