@@ -176,6 +176,7 @@ defmodule AgentsDemo.Agents.Factory do
       model: @main_model,
       api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
       stream: true,
+      cache_control: %{"type" => "ephemeral"},
       thinking: %{
         type: "enabled",
         budget_tokens: 3_000
