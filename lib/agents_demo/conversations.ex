@@ -214,6 +214,7 @@ defmodule AgentsDemo.Conversations do
   ## Options
 
     * `:limit` - Maximum number of messages to return (default: all)
+    * `:offset` - Number of messages to skip (default: 0)
   """
   def load_display_messages(%Scope{} = scope, conversation_id, opts \\ []) do
     case authorize_conversation(scope, conversation_id) do
@@ -227,6 +228,12 @@ defmodule AgentsDemo.Conversations do
           case Keyword.get(opts, :limit) do
             nil -> query
             limit -> limit(query, ^limit)
+          end
+
+        query =
+          case Keyword.get(opts, :offset) do
+            nil -> query
+            offset -> offset(query, ^offset)
           end
 
         Repo.all(query)
