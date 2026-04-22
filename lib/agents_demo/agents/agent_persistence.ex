@@ -3,7 +3,7 @@ defmodule AgentsDemo.Agents.AgentPersistence do
   Implements `Sagents.AgentPersistence` for state snapshots.
 
   Persists full agent state (messages, todos, metadata) to the database
-  via `AgentsDemo.Conversations.save_agent_state/2`.
+  via `AgentsDemo.Conversations.save_agent_state/3`.
   """
 
   @behaviour Sagents.AgentPersistence
@@ -11,31 +11,38 @@ defmodule AgentsDemo.Agents.AgentPersistence do
   require Logger
 
   @impl true
-  def persist_state(agent_id, state_data, context) do
-    conversation_id = extract_conversation_id(agent_id)
+  def persist_state(scope, state_data, context) do
+    conversation_id = extract_conversation_id(context.agent_id)
 
-    case AgentsDemo.Conversations.save_agent_state(conversation_id, state_data) do
+    case AgentsDemo.Conversations.save_agent_state(scope, conversation_id, state_data) do
       {:ok, _} ->
-        Logger.debug("Persisted agent state for #{agent_id} (#{context})")
+        Logger.debug("Persisted agent state for #{context.agent_id} (#{context.lifecycle})")
         :ok
 
       {:error, %Ecto.Changeset{errors: errors}} = error ->
         if conversation_deleted?(errors) do
           Logger.warning(
-            "Skipping agent state persistence for #{agent_id} (#{context}): conversation no longer exists"
+            "Skipping agent state persistence for #{context.agent_id} (#{context.lifecycle}): conversation no longer exists"
           )
 
           :ok
         else
           error
         end
+
+      {:error, :not_found} ->
+        Logger.warning(
+          "Skipping agent state persistence for #{context.agent_id} (#{context.lifecycle}): conversation not accessible in scope"
+        )
+
+        :ok
     end
   end
 
   @impl true
-  def load_state(agent_id) do
-    conversation_id = extract_conversation_id(agent_id)
-    AgentsDemo.Conversations.load_agent_state(conversation_id)
+  def load_state(scope, context) do
+    conversation_id = extract_conversation_id(context.agent_id)
+    AgentsDemo.Conversations.load_agent_state(scope, conversation_id)
   end
 
   defp extract_conversation_id(agent_id) do

@@ -2,6 +2,9 @@ defmodule AgentsDemo.ConversationsFixtures do
   @moduledoc """
   This module defines test helpers for creating
   entities via the `AgentsDemo.Conversations` context.
+
+  All fixtures take `scope` as their first argument — matching the
+  scope-first contract enforced by `AgentsDemo.Conversations`.
   """
 
   alias AgentsDemo.Conversations
@@ -24,9 +27,9 @@ defmodule AgentsDemo.ConversationsFixtures do
   end
 
   @doc """
-  Generate agent state for a conversation.
+  Generate agent state for a conversation, scoped.
   """
-  def agent_state_fixture(conversation_id, attrs \\ %{}) do
+  def agent_state_fixture(scope, conversation_id, attrs \\ %{}) do
     state_data =
       Map.get(attrs, :state_data, %{
         "version" => 1,
@@ -38,20 +41,20 @@ defmodule AgentsDemo.ConversationsFixtures do
         "metadata" => %{}
       })
 
-    {:ok, agent_state} = Conversations.save_agent_state(conversation_id, state_data)
+    {:ok, agent_state} = Conversations.save_agent_state(scope, conversation_id, state_data)
     agent_state
   end
 
   @doc """
-  Generate a text display message.
+  Generate a text display message, scoped.
   """
-  def text_message_fixture(conversation_id, attrs \\ %{}) do
+  def text_message_fixture(scope, conversation_id, attrs \\ %{}) do
     message_type = Map.get(attrs, :message_type, "user")
     text = Map.get(attrs, :text, "Test message #{System.unique_integer()}")
     sequence = Map.get(attrs, :sequence, 0)
 
     {:ok, message} =
-      Conversations.append_display_message(conversation_id, %{
+      Conversations.append_display_message(scope, conversation_id, %{
         message_type: message_type,
         content_type: "text",
         content: %{"text" => text},
@@ -63,14 +66,14 @@ defmodule AgentsDemo.ConversationsFixtures do
   end
 
   @doc """
-  Generate a thinking block message.
+  Generate a thinking block message, scoped.
   """
-  def thinking_message_fixture(conversation_id, attrs \\ %{}) do
+  def thinking_message_fixture(scope, conversation_id, attrs \\ %{}) do
     text = Map.get(attrs, :text, "Let me think about this...")
     sequence = Map.get(attrs, :sequence, 0)
 
     {:ok, message} =
-      Conversations.append_display_message(conversation_id, %{
+      Conversations.append_display_message(scope, conversation_id, %{
         message_type: "assistant",
         content_type: "thinking",
         content: %{"text" => text},
@@ -82,9 +85,9 @@ defmodule AgentsDemo.ConversationsFixtures do
   end
 
   @doc """
-  Generate an image message.
+  Generate an image message, scoped.
   """
-  def image_message_fixture(conversation_id, attrs \\ %{}) do
+  def image_message_fixture(scope, conversation_id, attrs \\ %{}) do
     url = Map.get(attrs, :url, "/uploads/test.png")
     message_type = Map.get(attrs, :message_type, "assistant")
     sequence = Map.get(attrs, :sequence, 0)
@@ -96,7 +99,7 @@ defmodule AgentsDemo.ConversationsFixtures do
       if caption = attrs[:caption], do: Map.put(content, "caption", caption), else: content
 
     {:ok, message} =
-      Conversations.append_display_message(conversation_id, %{
+      Conversations.append_display_message(scope, conversation_id, %{
         message_type: message_type,
         content_type: "image",
         content: content,
@@ -108,9 +111,9 @@ defmodule AgentsDemo.ConversationsFixtures do
   end
 
   @doc """
-  Generate a structured data message.
+  Generate a structured data message, scoped.
   """
-  def structured_data_message_fixture(conversation_id, attrs \\ %{}) do
+  def structured_data_message_fixture(scope, conversation_id, attrs \\ %{}) do
     format = Map.get(attrs, :format, "json")
     data = Map.get(attrs, :data, %{"status" => "ok"})
     sequence = Map.get(attrs, :sequence, 0)
@@ -118,7 +121,7 @@ defmodule AgentsDemo.ConversationsFixtures do
     content = %{"format" => format, "data" => data}
 
     {:ok, message} =
-      Conversations.append_display_message(conversation_id, %{
+      Conversations.append_display_message(scope, conversation_id, %{
         message_type: Map.get(attrs, :message_type, "tool"),
         content_type: "structured_data",
         content: content,
@@ -130,9 +133,9 @@ defmodule AgentsDemo.ConversationsFixtures do
   end
 
   @doc """
-  Generate an error message.
+  Generate an error message, scoped.
   """
-  def error_message_fixture(conversation_id, attrs \\ %{}) do
+  def error_message_fixture(scope, conversation_id, attrs \\ %{}) do
     text = Map.get(attrs, :text, "An error occurred")
     sequence = Map.get(attrs, :sequence, 0)
 
@@ -143,7 +146,7 @@ defmodule AgentsDemo.ConversationsFixtures do
       if details = attrs[:details], do: Map.put(content, "details", details), else: content
 
     {:ok, message} =
-      Conversations.append_display_message(conversation_id, %{
+      Conversations.append_display_message(scope, conversation_id, %{
         message_type: Map.get(attrs, :message_type, "tool"),
         content_type: "error",
         content: content,

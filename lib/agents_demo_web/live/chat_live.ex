@@ -142,7 +142,7 @@ defmodule AgentsDemoWeb.ChatLive do
       # Coordinator.start_conversation_session is idempotent
       case Coordinator.start_conversation_session(conversation_id,
              filesystem_scope: filesystem_scope,
-             user_scope: socket.assigns.current_scope,
+             scope: socket.assigns.current_scope,
              timezone: timezone
            ) do
         {:ok, session} ->
@@ -452,7 +452,10 @@ defmodule AgentsDemoWeb.ChatLive do
         stream(
           socket,
           :messages,
-          AgentsDemo.Conversations.load_display_messages(socket.assigns.conversation_id),
+          AgentsDemo.Conversations.load_display_messages(
+            socket.assigns.current_scope,
+            socket.assigns.conversation_id
+          ),
           reset: true
         )
       else
@@ -475,7 +478,7 @@ defmodule AgentsDemoWeb.ChatLive do
     # Once started, the agent will broadcast status changes and the button will disappear
     case Coordinator.start_conversation_session(conversation_id,
            filesystem_scope: filesystem_scope,
-           user_scope: socket.assigns.current_scope,
+           scope: socket.assigns.current_scope,
            timezone: timezone
          ) do
       {:ok, session} ->

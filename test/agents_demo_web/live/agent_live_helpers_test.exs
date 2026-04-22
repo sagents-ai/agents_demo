@@ -142,7 +142,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{conversation_id: 123}, [:messages])
 
       Conversations
-      |> reject(:append_text_message, 3)
+      |> reject(:append_text_message, 4)
 
       result = AgentLiveHelpers.handle_status_cancelled(socket)
       assert result.assigns.agent_status == :cancelled
@@ -319,11 +319,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.has_messages == true
     end
 
-    test "reloads from DB when conversation_id exists" do
-      socket = new_socket(%{conversation_id: 123}, [:messages])
+    test "reloads from DB when conversation_id and scope exist" do
+      scope = %AgentsDemo.Accounts.Scope{user: %{id: 1}}
+      socket = new_socket(%{conversation_id: 123, current_scope: scope}, [:messages])
 
       Conversations
-      |> expect(:load_display_messages, fn conv_id ->
+      |> expect(:load_display_messages, fn ^scope, conv_id ->
         assert conv_id == 123
         []
       end)
@@ -600,11 +601,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   end
 
   describe "reload_messages_from_db/1" do
-    test "reloads messages when conversation_id exists" do
-      socket = new_socket(%{conversation_id: 123})
+    test "reloads messages when conversation_id and scope exist" do
+      scope = %AgentsDemo.Accounts.Scope{user: %{id: 1}}
+      socket = new_socket(%{conversation_id: 123, current_scope: scope})
 
       Conversations
-      |> expect(:load_display_messages, fn conv_id ->
+      |> expect(:load_display_messages, fn ^scope, conv_id ->
         assert conv_id == 123
         [%{id: 1}, %{id: 2}]
       end)
@@ -619,7 +621,17 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket()
 
       Conversations
-      |> stub(:load_display_messages, fn _ -> raise "Should not be called" end)
+      |> stub(:load_display_messages, fn _, _ -> raise "Should not be called" end)
+
+      result = AgentLiveHelpers.reload_messages_from_db(socket)
+      assert result == socket
+    end
+
+    test "returns socket unchanged when current_scope is missing" do
+      socket = new_socket(%{conversation_id: 123})
+
+      Conversations
+      |> stub(:load_display_messages, fn _, _ -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reload_messages_from_db(socket)
       assert result == socket
@@ -639,11 +651,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert message.timestamp != nil
     end
 
-    test "persists message to database when conversation_id exists" do
-      socket = new_socket(%{conversation_id: 123})
+    test "persists message to database when conversation_id and scope exist" do
+      scope = %AgentsDemo.Accounts.Scope{user: %{id: 1}}
+      socket = new_socket(%{conversation_id: 123, current_scope: scope})
 
       Conversations
-      |> expect(:append_text_message, fn conv_id, message_type, text ->
+      |> expect(:append_text_message, fn ^scope, conv_id, message_type, text ->
         assert conv_id == 123
         assert message_type == :user
         assert text == "Hello"
@@ -657,10 +670,11 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     end
 
     test "creates fallback message when database persistence fails" do
-      socket = new_socket(%{conversation_id: 123})
+      scope = %AgentsDemo.Accounts.Scope{user: %{id: 1}}
+      socket = new_socket(%{conversation_id: 123, current_scope: scope})
 
       Conversations
-      |> stub(:append_text_message, fn _, _, _ -> {:error, :database_error} end)
+      |> stub(:append_text_message, fn _, _, _, _ -> {:error, :database_error} end)
 
       message = AgentLiveHelpers.create_or_persist_message(socket, :assistant, "Fallback")
 
@@ -802,8 +816,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _scope, _id -> conversation end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
@@ -852,11 +866,11 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> conversation end)
-      |> expect(:load_display_messages, fn conv_id ->
+      |> expect(:load_display_messages, fn _scope, conv_id ->
         assert conv_id == 123
         display_messages
       end)
-      |> expect(:load_todos, fn conv_id ->
+      |> expect(:load_todos, fn _scope, conv_id ->
         assert conv_id == 123
         todos
       end)
@@ -880,8 +894,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
@@ -905,8 +919,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
@@ -936,8 +950,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
@@ -957,8 +971,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "New"} end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
@@ -987,8 +1001,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Same"} end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
@@ -1011,8 +1025,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _, _ -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _ -> [] end)
-      |> stub(:load_todos, fn _ -> [] end)
+      |> stub(:load_display_messages, fn _, _ -> [] end)
+      |> stub(:load_todos, fn _, _ -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)

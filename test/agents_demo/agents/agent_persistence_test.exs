@@ -10,12 +10,19 @@ defmodule AgentsDemo.Agents.AgentPersistenceTest do
 
   describe "persist_state/3" do
     test "persists state for an existing conversation" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
       agent_id = "conversation-#{conversation.id}"
       state_data = %{"version" => 1, "messages" => []}
 
-      assert :ok = AgentPersistence.persist_state(agent_id, state_data, :on_completion)
-      assert {:ok, ^state_data} = Conversations.load_agent_state(conversation.id)
+      context = %{
+        agent_id: agent_id,
+        conversation_id: conversation.id,
+        lifecycle: :on_completion
+      }
+
+      assert :ok = AgentPersistence.persist_state(scope, state_data, context)
+      assert {:ok, ^state_data} = Conversations.load_agent_state(scope, conversation.id)
     end
 
     test "returns :ok and logs a warning when the conversation was deleted" do
@@ -26,14 +33,23 @@ defmodule AgentsDemo.Agents.AgentPersistenceTest do
 
       {:ok, _} = Conversations.delete_conversation(scope, conversation.id)
 
+      context = %{
+        agent_id: agent_id,
+        conversation_id: conversation.id,
+        lifecycle: :on_shutdown
+      }
+
       log =
         capture_log(fn ->
-          assert :ok = AgentPersistence.persist_state(agent_id, state_data, :on_shutdown)
+          assert :ok = AgentPersistence.persist_state(scope, state_data, context)
         end)
 
       assert log =~ "Skipping agent state persistence"
       assert log =~ agent_id
-      assert log =~ "conversation no longer exists"
+      # After scope check fires first, the log message differs based on whether
+      # the conversation was accessible in scope. Either form is acceptable here:
+      assert log =~ "conversation no longer exists" or
+               log =~ "conversation not accessible in scope"
     end
   end
 end

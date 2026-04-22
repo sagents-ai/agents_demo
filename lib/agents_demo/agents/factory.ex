@@ -77,7 +77,7 @@ defmodule AgentsDemo.Agents.Factory do
   # Model Configuration (edit these module attributes to change models)
   # ---------------------------------------------------------------------------
 
-  # Primary model for agent conversations (ChatReqLLM uses "provider:model_id" format)
+  # Primary model for agent conversations.
   # See: https://docs.anthropic.com/en/docs/models-overview
   @main_model "claude-sonnet-4-6"
   # @main_model "anthropic:claude-sonnet-4-6"
@@ -142,7 +142,7 @@ defmodule AgentsDemo.Agents.Factory do
   def create_agent(opts \\ []) do
     agent_id = Keyword.fetch!(opts, :agent_id)
     filesystem_scope = Keyword.fetch!(opts, :filesystem_scope)
-    user_scope = Keyword.get(opts, :user_scope)
+    scope = Keyword.get(opts, :scope)
     timezone = Keyword.get(opts, :timezone, "UTC")
     interrupt_on = Keyword.get(opts, :interrupt_on, default_interrupt_on())
     tool_context = Keyword.get(opts, :tool_context, %{})
@@ -152,13 +152,14 @@ defmodule AgentsDemo.Agents.Factory do
         agent_id: agent_id,
         model: get_model_config(),
         base_system_prompt: base_system_prompt(),
-        middleware: build_middleware(filesystem_scope, interrupt_on, timezone, user_scope),
+        middleware: build_middleware(filesystem_scope, interrupt_on, timezone, scope),
         name: "Demo Agent",
         fallback_models: get_fallback_models(),
         before_fallback: get_before_fallback(),
         # Add any custom tools here (tools not provided by middleware)
         tools: [],
-        tool_context: tool_context
+        tool_context: tool_context,
+        scope: scope
       },
       # Since we specify the full middleware stack, don't add defaults
       replace_default_middleware: true
@@ -377,7 +378,7 @@ defmodule AgentsDemo.Agents.Factory do
   # Order matters! Early middleware sees messages first (before_model) and
   # processes responses last (after_model).
   #
-  defp build_middleware(filesystem_scope, interrupt_on, timezone, user_scope) do
+  defp build_middleware(filesystem_scope, interrupt_on, timezone, scope) do
     [
       # Task management - gives the agent a todo list for tracking work
       Sagents.Middleware.TodoList,
@@ -412,7 +413,7 @@ defmodule AgentsDemo.Agents.Factory do
        ]},
 
       # Inject the user's first name into the first user message
-      {AgentsDemo.Middleware.UserContextMiddleware, [scope: user_scope]},
+      {AgentsDemo.Middleware.UserContextMiddleware, [scope: scope]},
 
       # Custom middleware that injects the current time into every user message
       {InjectCurrentTime, [timezone: timezone]},

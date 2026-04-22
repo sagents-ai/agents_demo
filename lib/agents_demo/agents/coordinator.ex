@@ -120,13 +120,17 @@ defmodule AgentsDemo.Agents.Coordinator do
   ## Options
 
   - `:filesystem_scope` - Required. Filesystem scope tuple (e.g., `{:user, user_id}`)
-  - `:user_scope` - Optional. The Phoenix scope (e.g., `current_scope`). Automatically
-    injected into `tool_context` as `:current_scope`, so tool functions receive `context.current_scope`.
+  - `:scope` - The Phoenix scope (e.g., `current_scope`). In production this should
+    come from the caller's session (e.g., a LiveView's `socket.assigns.current_scope`).
+    `nil` is allowed for tests, admin scripts, or background jobs, but tenant-scoped
+    queries downstream will have no owner to filter by. Set on the agent's `:scope`
+    field via the Factory; sagents propagates it as the first positional argument to
+    persistence callbacks and as `context.scope` to tool functions.
   - `:inactivity_timeout` - Milliseconds before agent stops (default: 10 minutes)
-  - `:tool_context` - Map of additional caller-supplied data that will be available to
-    all tool functions as their second argument. Defaults to `%{}`.
-    Note: `:user_scope` is automatically injected as `:current_scope` in `tool_context`,
-    so tool functions always have access to `context.current_scope`.
+  - `:tool_context` - Map of caller-supplied data. Its entries become keys on
+    the `context` map passed as the tool function's second argument. For example,
+    `%{feature_flags: flags}` here lets tools read `context.feature_flags`.
+    Defaults to `%{}`.
   - `:factory_opts` - Additional options passed to your Factory module (e.g., `:timezone` for custom middleware)
 
   ## Returns
@@ -185,7 +189,7 @@ defmodule AgentsDemo.Agents.Coordinator do
           """
       end
 
-    user_scope = Keyword.get(opts, :user_scope)
+    scope = Keyword.get(opts, :scope)
     tool_context = Keyword.get(opts, :tool_context, %{})
 
     agent_id = conversation_agent_id(conversation_id)
@@ -196,7 +200,7 @@ defmodule AgentsDemo.Agents.Coordinator do
           conversation_id,
           agent_id,
           filesystem_scope,
-          user_scope,
+          scope,
           tool_context,
           opts
         )
@@ -436,7 +440,7 @@ defmodule AgentsDemo.Agents.Coordinator do
          conversation_id,
          agent_id,
          filesystem_scope,
-         user_scope,
+         scope,
          tool_context,
          opts
        ) do
@@ -448,23 +452,22 @@ defmodule AgentsDemo.Agents.Coordinator do
     timezone = Keyword.get(opts, :timezone, "UTC")
     factory_opts = Keyword.get(opts, :factory_opts, [])
 
-    # 2. Create agent from factory (configuration from code)
-    # Auto-merge user_scope into tool_context so tool functions always receive
-    # the Phoenix scope as context.current_scope.
-    tool_context = Map.put(tool_context, :current_scope, user_scope)
-
+    # 2. Create agent from factory (configuration from code).
+    # Scope is passed as a dedicated :scope option. Sagents auto-merges it into
+    # custom_context under the canonical :scope key and threads it through
+    # persistence callbacks as the first positional argument.
     merged_factory_opts =
       factory_opts
       |> Keyword.put(:agent_id, agent_id)
       |> Keyword.put(:filesystem_scope, filesystem_scope)
-      |> Keyword.put(:user_scope, user_scope)
+      |> Keyword.put(:scope, scope)
       |> Keyword.put(:tool_context, tool_context)
       |> Keyword.put(:timezone, timezone)
 
     {:ok, agent} = AgentsDemo.Agents.Factory.create_agent(merged_factory_opts)
 
-    # 3. Load or create state (data from database)
-    {:ok, state} = create_conversation_state(conversation_id)
+    # 3. Load or create state (data from database, scoped to the caller)
+    {:ok, state} = create_conversation_state(conversation_id, scope)
 
     # 4. Extract configuration from options
     inactivity_timeout =
@@ -523,10 +526,14 @@ defmodule AgentsDemo.Agents.Coordinator do
     end
   end
 
-  defp create_conversation_state(conversation_id) do
+  defp create_conversation_state(conversation_id, scope) do
     agent_id = conversation_agent_id(conversation_id)
 
-    load_result = AgentsDemo.Agents.AgentPersistence.load_state(agent_id)
+    load_result =
+      AgentsDemo.Agents.AgentPersistence.load_state(scope, %{
+        agent_id: agent_id,
+        conversation_id: conversation_id
+      })
 
     case load_result do
       {:ok, exported_state} ->

@@ -86,7 +86,6 @@ defmodule AgentsDemo.ConversationsTest do
     test "orders conversations by updated_at DESC" do
       scope = user_scope_fixture()
 
-      # Create conversations with slight delays to ensure different timestamps
       conv1 = conversation_fixture(%{scope: scope, title: "First"})
       :timer.sleep(10)
       conv2 = conversation_fixture(%{scope: scope, title: "Second"})
@@ -95,7 +94,6 @@ defmodule AgentsDemo.ConversationsTest do
 
       conversations = Conversations.list_conversations(scope)
 
-      # Most recent first
       assert Enum.at(conversations, 0).id == conv3.id
       assert Enum.at(conversations, 1).id == conv2.id
       assert Enum.at(conversations, 2).id == conv1.id
@@ -123,7 +121,6 @@ defmodule AgentsDemo.ConversationsTest do
       offset_conversations = Conversations.list_conversations(scope, limit: 5, offset: 5)
 
       assert length(offset_conversations) == 5
-      # Should get the 6th through 10th conversations
       assert Enum.at(offset_conversations, 0).id == Enum.at(all_conversations, 5).id
     end
   end
@@ -165,30 +162,33 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "deletes associated agent state" do
-      conversation = conversation_fixture()
-      agent_state_fixture(conversation.id)
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      agent_state_fixture(scope, conversation.id)
 
       assert {:ok, _} = Conversations.delete_conversation(conversation)
 
       # Agent state should be deleted due to on_delete: :delete_all
-      assert {:error, :not_found} = Conversations.load_agent_state(conversation.id)
+      assert {:error, :not_found} = Conversations.load_agent_state(scope, conversation.id)
     end
 
     test "deletes associated display messages" do
-      conversation = conversation_fixture()
-      text_message_fixture(conversation.id, %{text: "Message 1"})
-      text_message_fixture(conversation.id, %{text: "Message 2"})
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      text_message_fixture(scope, conversation.id, %{text: "Message 1"})
+      text_message_fixture(scope, conversation.id, %{text: "Message 2"})
 
       assert {:ok, _} = Conversations.delete_conversation(conversation)
 
-      # Messages should be deleted due to on_delete: :delete_all
-      assert [] = Conversations.load_display_messages(conversation.id)
+      # `load_display_messages` returns [] when conversation is missing in scope.
+      assert [] = Conversations.load_display_messages(scope, conversation.id)
     end
   end
 
-  describe "save_agent_state/2 and load_agent_state/1" do
+  describe "save_agent_state/3 and load_agent_state/2" do
     test "saves agent state for new conversation" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       state_data = %{
         "version" => 1,
@@ -197,7 +197,7 @@ defmodule AgentsDemo.ConversationsTest do
       }
 
       assert {:ok, %AgentState{} = agent_state} =
-               Conversations.save_agent_state(conversation.id, state_data)
+               Conversations.save_agent_state(scope, conversation.id, state_data)
 
       assert agent_state.conversation_id == conversation.id
       assert agent_state.state_data == state_data
@@ -205,13 +205,14 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "updates existing agent state" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       state_v1 = %{"version" => 1, "agent_id" => "test", "messages" => []}
       state_v2 = %{"version" => 2, "agent_id" => "test", "messages" => [%{"new" => "data"}]}
 
-      assert {:ok, initial} = Conversations.save_agent_state(conversation.id, state_v1)
-      assert {:ok, updated} = Conversations.save_agent_state(conversation.id, state_v2)
+      assert {:ok, initial} = Conversations.save_agent_state(scope, conversation.id, state_v1)
+      assert {:ok, updated} = Conversations.save_agent_state(scope, conversation.id, state_v2)
 
       # Should be the same record, just updated
       assert initial.id == updated.id
@@ -220,25 +221,51 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "loads agent state successfully" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
       state_data = %{"version" => 1, "data" => "test"}
 
-      {:ok, _} = Conversations.save_agent_state(conversation.id, state_data)
+      {:ok, _} = Conversations.save_agent_state(scope, conversation.id, state_data)
 
-      assert {:ok, loaded_state} = Conversations.load_agent_state(conversation.id)
+      assert {:ok, loaded_state} = Conversations.load_agent_state(scope, conversation.id)
       assert loaded_state == state_data
     end
 
     test "returns error when no agent state exists" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
-      assert {:error, :not_found} = Conversations.load_agent_state(conversation.id)
+      assert {:error, :not_found} = Conversations.load_agent_state(scope, conversation.id)
+    end
+
+    test "wrong-scope save returns :not_found without writing" do
+      owner_scope = user_scope_fixture()
+      other_scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: owner_scope})
+
+      state_data = %{"version" => 1, "messages" => []}
+
+      assert {:error, :not_found} =
+               Conversations.save_agent_state(other_scope, conversation.id, state_data)
+
+      # Confirm no state was persisted under the owner
+      assert {:error, :not_found} = Conversations.load_agent_state(owner_scope, conversation.id)
+    end
+
+    test "wrong-scope load returns :not_found even when state exists" do
+      owner_scope = user_scope_fixture()
+      other_scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: owner_scope})
+      {:ok, _} = Conversations.save_agent_state(owner_scope, conversation.id, %{"v" => 1})
+
+      assert {:error, :not_found} = Conversations.load_agent_state(other_scope, conversation.id)
     end
   end
 
-  describe "append_display_message/2" do
+  describe "append_display_message/3" do
     test "creates a display message with valid attributes" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       attrs = %{
         message_type: "user",
@@ -249,7 +276,7 @@ defmodule AgentsDemo.ConversationsTest do
       }
 
       assert {:ok, %DisplayMessage{} = message} =
-               Conversations.append_display_message(conversation.id, attrs)
+               Conversations.append_display_message(scope, conversation.id, attrs)
 
       assert message.conversation_id == conversation.id
       assert message.message_type == "user"
@@ -260,9 +287,11 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "validates required fields" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
-      assert {:error, changeset} = Conversations.append_display_message(conversation.id, %{})
+      assert {:error, changeset} =
+               Conversations.append_display_message(scope, conversation.id, %{})
 
       assert %{
                message_type: ["can't be blank"],
@@ -272,7 +301,8 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "validates content_type inclusion" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       attrs = %{
         message_type: "user",
@@ -280,16 +310,19 @@ defmodule AgentsDemo.ConversationsTest do
         content: %{"text" => "test"}
       }
 
-      assert {:error, changeset} = Conversations.append_display_message(conversation.id, attrs)
+      assert {:error, changeset} =
+               Conversations.append_display_message(scope, conversation.id, attrs)
+
       assert "is invalid" in errors_on(changeset).content_type
     end
 
     test "validates content structure for text type" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       # Valid text content
       assert {:ok, _} =
-               Conversations.append_display_message(conversation.id, %{
+               Conversations.append_display_message(scope, conversation.id, %{
                  message_type: "user",
                  content_type: "text",
                  content: %{"text" => "Hello"}
@@ -297,7 +330,7 @@ defmodule AgentsDemo.ConversationsTest do
 
       # Invalid text content (missing "text" key)
       assert {:error, changeset} =
-               Conversations.append_display_message(conversation.id, %{
+               Conversations.append_display_message(scope, conversation.id, %{
                  message_type: "user",
                  content_type: "text",
                  content: %{"wrong_key" => "Hello"}
@@ -307,7 +340,8 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "defaults sequence to 0 when not provided" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       attrs = %{
         message_type: "user",
@@ -315,12 +349,15 @@ defmodule AgentsDemo.ConversationsTest do
         content: %{"text" => "Hello"}
       }
 
-      assert {:ok, message} = Conversations.append_display_message(conversation.id, attrs)
+      assert {:ok, message} =
+               Conversations.append_display_message(scope, conversation.id, attrs)
+
       assert message.sequence == 0
     end
 
     test "validates sequence is non-negative" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       attrs = %{
         message_type: "user",
@@ -329,76 +366,108 @@ defmodule AgentsDemo.ConversationsTest do
         sequence: -1
       }
 
-      assert {:error, changeset} = Conversations.append_display_message(conversation.id, attrs)
+      assert {:error, changeset} =
+               Conversations.append_display_message(scope, conversation.id, attrs)
+
       assert "must be greater than or equal to 0" in errors_on(changeset).sequence
+    end
+
+    test "wrong-scope caller receives :not_found and no row is inserted" do
+      owner_scope = user_scope_fixture()
+      other_scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: owner_scope})
+
+      attrs = %{
+        message_type: "user",
+        content_type: "text",
+        content: %{"text" => "intruder"}
+      }
+
+      assert {:error, :not_found} =
+               Conversations.append_display_message(other_scope, conversation.id, attrs)
+
+      assert [] = Conversations.load_display_messages(owner_scope, conversation.id)
     end
   end
 
-  describe "load_display_messages/2" do
+  describe "load_display_messages/3" do
     test "loads messages ordered by inserted_at and sequence" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
-      # User message
-      msg1 = text_message_fixture(conversation.id, %{text: "User: Hello", sequence: 0})
+      msg1 = text_message_fixture(scope, conversation.id, %{text: "User: Hello", sequence: 0})
 
-      # Simulate multi-part assistant response (thinking + text)
-      msg2 = thinking_message_fixture(conversation.id, %{text: "Let me think...", sequence: 0})
+      msg2 =
+        thinking_message_fixture(scope, conversation.id, %{text: "Let me think...", sequence: 0})
 
       msg3 =
-        text_message_fixture(conversation.id, %{
+        text_message_fixture(scope, conversation.id, %{
           text: "Assistant: Response",
           message_type: "assistant",
           sequence: 1
         })
 
-      messages = Conversations.load_display_messages(conversation.id)
+      messages = Conversations.load_display_messages(scope, conversation.id)
 
       assert length(messages) == 3
-
-      # Should be ordered by inserted_at first, then sequence
       assert Enum.at(messages, 0).id == msg1.id
       assert Enum.at(messages, 1).id == msg2.id
       assert Enum.at(messages, 2).id == msg3.id
     end
 
     test "returns empty list for conversation with no messages" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
-      assert [] = Conversations.load_display_messages(conversation.id)
+      assert [] = Conversations.load_display_messages(scope, conversation.id)
     end
 
     test "respects limit option" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       for i <- 1..10 do
-        text_message_fixture(conversation.id, %{text: "Message #{i}"})
+        text_message_fixture(scope, conversation.id, %{text: "Message #{i}"})
       end
 
-      messages = Conversations.load_display_messages(conversation.id, limit: 5)
+      messages = Conversations.load_display_messages(scope, conversation.id, limit: 5)
       assert length(messages) == 5
     end
 
     test "respects offset option" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       for i <- 1..10 do
-        text_message_fixture(conversation.id, %{text: "Message #{i}"})
+        text_message_fixture(scope, conversation.id, %{text: "Message #{i}"})
       end
 
-      all_messages = Conversations.load_display_messages(conversation.id, limit: 100)
-      offset_messages = Conversations.load_display_messages(conversation.id, limit: 5, offset: 5)
+      all_messages = Conversations.load_display_messages(scope, conversation.id, limit: 100)
+
+      offset_messages =
+        Conversations.load_display_messages(scope, conversation.id, limit: 5, offset: 5)
 
       assert length(offset_messages) == 5
       assert Enum.at(offset_messages, 0).id == Enum.at(all_messages, 5).id
     end
+
+    test "wrong-scope caller receives []" do
+      owner_scope = user_scope_fixture()
+      other_scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: owner_scope})
+      text_message_fixture(owner_scope, conversation.id, %{text: "owner-only"})
+
+      assert [] = Conversations.load_display_messages(other_scope, conversation.id)
+    end
   end
 
-  describe "append_text_message/3" do
+  describe "append_text_message/4" do
     test "creates a text message for user" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       assert {:ok, message} =
-               Conversations.append_text_message(conversation.id, "user", "Hello there!")
+               Conversations.append_text_message(scope, conversation.id, "user", "Hello there!")
 
       assert message.message_type == "user"
       assert message.content_type == "text"
@@ -407,10 +476,11 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "creates a text message for assistant" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
       assert {:ok, message} =
-               Conversations.append_text_message(conversation.id, "assistant", "Hi!")
+               Conversations.append_text_message(scope, conversation.id, "assistant", "Hi!")
 
       assert message.message_type == "assistant"
       assert message.content_type == "text"
@@ -423,9 +493,9 @@ defmodule AgentsDemo.ConversationsTest do
       scope = user_scope_fixture()
       conversation = conversation_fixture(%{scope: scope})
 
-      text_message_fixture(conversation.id, %{text: "Hello world"})
-      text_message_fixture(conversation.id, %{text: "Testing search functionality"})
-      text_message_fixture(conversation.id, %{text: "Another message"})
+      text_message_fixture(scope, conversation.id, %{text: "Hello world"})
+      text_message_fixture(scope, conversation.id, %{text: "Testing search functionality"})
+      text_message_fixture(scope, conversation.id, %{text: "Another message"})
 
       results = Conversations.search_messages(scope, "search")
 
@@ -437,7 +507,7 @@ defmodule AgentsDemo.ConversationsTest do
       scope = user_scope_fixture()
       conversation = conversation_fixture(%{scope: scope})
 
-      text_message_fixture(conversation.id, %{text: "Testing SEARCH"})
+      text_message_fixture(scope, conversation.id, %{text: "Testing SEARCH"})
 
       results = Conversations.search_messages(scope, "search")
       assert length(results) == 1
@@ -450,15 +520,13 @@ defmodule AgentsDemo.ConversationsTest do
       conv1 = conversation_fixture(%{scope: scope1})
       conv2 = conversation_fixture(%{scope: scope2})
 
-      text_message_fixture(conv1.id, %{text: "findme in user1"})
-      text_message_fixture(conv2.id, %{text: "findme in user2"})
+      text_message_fixture(scope1, conv1.id, %{text: "findme in user1"})
+      text_message_fixture(scope2, conv2.id, %{text: "findme in user2"})
 
-      # scope1 should only find their message
       results1 = Conversations.search_messages(scope1, "findme")
       assert length(results1) == 1
       assert Enum.at(results1, 0).conversation_id == conv1.id
 
-      # scope2 should only find their message
       results2 = Conversations.search_messages(scope2, "findme")
       assert length(results2) == 1
       assert Enum.at(results2, 0).conversation_id == conv2.id
@@ -467,25 +535,23 @@ defmodule AgentsDemo.ConversationsTest do
 
   describe "sequence ordering in multi-part messages" do
     test "correctly orders thinking + text + image with same timestamp" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
-      # Simulate a multi-part assistant response arriving at nearly the same time
-      # In real usage, these would all be created within microseconds
-
-      thinking = thinking_message_fixture(conversation.id, %{text: "Analyzing...", sequence: 0})
+      thinking =
+        thinking_message_fixture(scope, conversation.id, %{text: "Analyzing...", sequence: 0})
 
       text =
-        text_message_fixture(conversation.id, %{
+        text_message_fixture(scope, conversation.id, %{
           text: "Here's the result",
           message_type: "assistant",
           sequence: 1
         })
 
-      image = image_message_fixture(conversation.id, %{url: "/chart.png", sequence: 2})
+      image = image_message_fixture(scope, conversation.id, %{url: "/chart.png", sequence: 2})
 
-      messages = Conversations.load_display_messages(conversation.id)
+      messages = Conversations.load_display_messages(scope, conversation.id)
 
-      # Verify order: thinking, text, image
       assert length(messages) == 3
       assert Enum.at(messages, 0).id == thinking.id
       assert Enum.at(messages, 1).id == text.id
@@ -493,29 +559,25 @@ defmodule AgentsDemo.ConversationsTest do
     end
 
     test "sequence resets for each message group" do
-      conversation = conversation_fixture()
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
 
-      # First message group (user)
-      msg1 = text_message_fixture(conversation.id, %{text: "User question", sequence: 0})
+      msg1 = text_message_fixture(scope, conversation.id, %{text: "User question", sequence: 0})
 
-      # Second message group (assistant multi-part)
-      # Ensure different timestamp
       :timer.sleep(10)
-      msg2 = thinking_message_fixture(conversation.id, %{text: "Thinking", sequence: 0})
+      msg2 = thinking_message_fixture(scope, conversation.id, %{text: "Thinking", sequence: 0})
 
       msg3 =
-        text_message_fixture(conversation.id, %{
+        text_message_fixture(scope, conversation.id, %{
           text: "Response",
           message_type: "assistant",
           sequence: 1
         })
 
-      # Third message group (user)
-      # Ensure different timestamp
       :timer.sleep(10)
-      msg4 = text_message_fixture(conversation.id, %{text: "Follow-up", sequence: 0})
+      msg4 = text_message_fixture(scope, conversation.id, %{text: "Follow-up", sequence: 0})
 
-      messages = Conversations.load_display_messages(conversation.id)
+      messages = Conversations.load_display_messages(scope, conversation.id)
 
       assert length(messages) == 4
       assert Enum.at(messages, 0).id == msg1.id
