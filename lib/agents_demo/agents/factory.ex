@@ -77,7 +77,7 @@ defmodule AgentsDemo.Agents.Factory do
   # Model Configuration (edit these module attributes to change models)
   # ---------------------------------------------------------------------------
 
-  # Primary model for agent conversations.
+  # Primary model for agent conversations
   # See: https://docs.anthropic.com/en/docs/models-overview
   @main_model "claude-sonnet-4-6"
   # @main_model "anthropic:claude-sonnet-4-6"
@@ -101,6 +101,12 @@ defmodule AgentsDemo.Agents.Factory do
     Examples: `{:user, user_id}`, `{:project, 456}`, `{:team, 789}`.
     Pass `nil` for agent-scoped (isolated per conversation).
   - `:timezone` - Optional. IANA timezone string (default: "UTC").
+  - `:scope` - Integrator-defined scope struct (e.g., `%MyApp.Accounts.Scope{}`).
+    In production this should be passed by the Coordinator from the caller's session.
+    `nil` is allowed (for tests, admin scripts, or background jobs without a user
+    context) but tenant-scoped queries downstream will have no owner to filter by.
+    Set on `agent.scope`; sagents propagates to persistence callbacks (arg #1) and
+    to tool `context.scope`.
   - `:interrupt_on` - Optional. Map of tool names requiring approval.
     Pass `nil` to disable HITL entirely.
   - `:tool_context` - Optional. Map of caller-supplied data passed to tool functions
