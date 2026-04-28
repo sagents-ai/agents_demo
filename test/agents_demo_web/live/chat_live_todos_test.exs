@@ -305,11 +305,11 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
         agent_id = final_assigns[:agent_id]
 
         if agent_id do
-          AgentServer.subscribe(agent_id)
+          {:ok, _pid, _ref} = AgentServer.subscribe(agent_id)
 
           # Wait for todos_updated event
           receive do
-            {:todos_updated, todos} ->
+            {:agent, {:todos_updated, todos}} ->
               assert length(todos) == 2
               assert Enum.any?(todos, &(&1.content == "Task 1"))
               assert Enum.any?(todos, &(&1.content == "Task 2"))

@@ -60,10 +60,10 @@ defmodule AgentsDemo.Agents.DemoSetup do
         storage_opts: [path: storage_path]
       })
 
-    # Start the filesystem (idempotent) with PubSub for real-time updates
-    pubsub_config = {Phoenix.PubSub, AgentsDemo.PubSub}
-
-    case FileSystem.ensure_filesystem(scope_key, [fs_config], pubsub: pubsub_config) do
+    # Start the filesystem (idempotent). File-change events are delivered
+    # directly to subscribers via Sagents.Publisher (see
+    # `Sagents.FileSystemServer.subscribe/1`).
+    case FileSystem.ensure_filesystem(scope_key, [fs_config]) do
       {:ok, _pid} ->
         Logger.info("User filesystem ready for user #{user_id} (scope: #{inspect(scope_key)})")
         {:ok, scope_key}

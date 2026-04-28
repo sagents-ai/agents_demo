@@ -46,6 +46,7 @@ defmodule AgentsDemoWeb.Router do
 
       sagents_live_debugger("/debug/agents",
         coordinator: AgentsDemo.Agents.Coordinator,
+        pubsub: AgentsDemo.PubSub,
         presence_module: AgentsDemoWeb.Presence
       )
     end

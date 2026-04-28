@@ -406,6 +406,8 @@ defmodule AgentsDemo.Agents.Factory do
       # SubAgent - spawn child agents for complex tasks
       # Configure block_middleware to prevent certain middleware from being
       # inherited by subagents (e.g., Summarization, ConversationTitle).
+      # AskUserQuestion is blocked because sub-agents should complete tasks
+      # autonomously without pausing to quiz the user.
       {Sagents.Middleware.SubAgent,
        [
          block_middleware: [

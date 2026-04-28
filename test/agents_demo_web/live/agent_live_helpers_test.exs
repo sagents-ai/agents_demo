@@ -19,6 +19,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     Mimic.copy(AgentsDemo.Agents.Coordinator)
     Mimic.copy(Sagents.AgentServer)
     Mimic.copy(Sagents.FileSystemServer)
+    Mimic.copy(Sagents.Subscriber)
     :ok
   end
 
@@ -574,13 +575,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   # CORE HELPER FUNCTION TESTS
   # =========================================================================
 
-  describe "update_streaming_message/2" do
+  describe "handle_llm_deltas/2 (streaming message accumulation)" do
     test "initializes streaming_delta with first delta" do
       socket = new_socket(%{streaming_delta: nil})
 
       delta = %MessageDelta{role: :assistant, content: "Hello", status: :incomplete}
 
-      result = AgentLiveHelpers.update_streaming_message(socket, [delta])
+      result = AgentLiveHelpers.handle_llm_deltas(socket, [delta])
 
       assert result.assigns.streaming_delta != nil
       assert result.assigns.streaming_delta.role == :assistant
@@ -590,10 +591,10 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{streaming_delta: nil})
 
       delta1 = %MessageDelta{role: :assistant, content: "Hello", status: :incomplete}
-      socket = AgentLiveHelpers.update_streaming_message(socket, [delta1])
+      socket = AgentLiveHelpers.handle_llm_deltas(socket, [delta1])
 
       delta2 = %MessageDelta{content: " world", status: :incomplete}
-      result = AgentLiveHelpers.update_streaming_message(socket, [delta2])
+      result = AgentLiveHelpers.handle_llm_deltas(socket, [delta2])
 
       assert result.assigns.streaming_delta != nil
       assert result.assigns.streaming_delta.role == :assistant
@@ -762,42 +763,57 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.loading == false
     end
 
-    test "unsubscribes from conversation when connected" do
-      socket = new_socket(%{conversation_id: "conv-123"}, [], connected: true)
+    test "unsubscribes from agent when connected" do
+      socket =
+        new_socket(
+          %{
+            conversation_id: "conv-123",
+            agent_id: "agent-123",
+            sagents_subs: %{
+              {:agent, "agent-123"} => %{
+                channel: :main,
+                server_pid: self(),
+                monitor_ref: nil,
+                client_ref: make_ref(),
+                state: :subscribed
+              }
+            }
+          },
+          [],
+          connected: true
+        )
 
-      AgentsDemo.Agents.Coordinator
-      |> expect(:unsubscribe_from_conversation, fn conv_id ->
-        assert conv_id == "conv-123"
-        :ok
+      Sagents.Subscriber
+      |> expect(:unsubscribe_from_agent, fn _subs, agent_id ->
+        assert agent_id == "agent-123"
+        %{}
       end)
 
       result = AgentLiveHelpers.reset_conversation(socket)
 
-      # Should reset assigns after unsubscribing
       assert result.assigns.conversation_id == nil
+      assert result.assigns.sagents_subs == %{}
     end
 
     test "does not unsubscribe when not connected" do
-      socket = new_socket(%{conversation_id: "conv-123"})
+      socket = new_socket(%{conversation_id: "conv-123", agent_id: "agent-123"})
 
-      AgentsDemo.Agents.Coordinator
-      |> stub(:unsubscribe_from_conversation, fn _ -> raise "Should not be called" end)
+      Sagents.Subscriber
+      |> stub(:unsubscribe_from_agent, fn _, _ -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reset_conversation(socket)
 
-      # Should still reset assigns
       assert result.assigns.conversation_id == nil
     end
 
-    test "does not unsubscribe when no conversation_id" do
+    test "does not unsubscribe when no agent_id" do
       socket = new_socket([], [], connected: true)
 
-      AgentsDemo.Agents.Coordinator
-      |> stub(:unsubscribe_from_conversation, fn _ -> raise "Should not be called" end)
+      Sagents.Subscriber
+      |> stub(:unsubscribe_from_agent, fn _, _ -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reset_conversation(socket)
 
-      # Should reset to defaults
       assert result.assigns.conversation_id == nil
       assert result.assigns.agent_status == :not_running
     end
@@ -821,8 +837,10 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
-      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
       |> stub(:track_conversation_viewer, fn _, _ -> {:ok, :ref} end)
+
+      Sagents.Subscriber
+      |> stub(:subscribe_to_agent, fn subs, _agent_id -> subs end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
@@ -913,7 +931,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.agent_status == :idle
     end
 
-    test "subscribes to conversation when connected" do
+    test "subscribes to agent when connected" do
       socket = new_socket([], [], connected: true)
       scope = {:user, 1}
 
@@ -922,26 +940,41 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       |> stub(:load_display_messages, fn _, _ -> [] end)
       |> stub(:load_todos, fn _, _ -> [] end)
 
+      sample_subs = %{
+        {:agent, "agent-123"} => %{
+          channel: :main,
+          server_pid: self(),
+          monitor_ref: nil,
+          client_ref: make_ref(),
+          state: :subscribed
+        }
+      }
+
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
-      |> expect(:ensure_subscribed_to_conversation, fn conv_id ->
-        assert conv_id == 123
-        :ok
-      end)
       |> expect(:track_conversation_viewer, fn conv_id, user_id ->
         assert conv_id == 123
         assert user_id == 1
         {:ok, :ref}
       end)
 
+      Sagents.Subscriber
+      |> expect(:subscribe_to_agent, fn subs, agent_id ->
+        assert subs == %{}
+        assert agent_id == "agent-123"
+        sample_subs
+      end)
+
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
 
-      {:ok, _result} =
+      {:ok, result} =
         AgentLiveHelpers.load_conversation(socket, 123,
           scope: scope,
           user_id: 1
         )
+
+      assert result.assigns.sagents_subs == sample_subs
     end
 
     test "does not subscribe when not connected" do
@@ -955,8 +988,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
-      |> stub(:ensure_subscribed_to_conversation, fn _ -> raise "Should not be called" end)
       |> stub(:track_conversation_viewer, fn _, _ -> raise "Should not be called" end)
+
+      Sagents.Subscriber
+      |> stub(:subscribe_to_agent, fn _, _ ->
+        raise "Should not be called when disconnected"
+      end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
@@ -965,8 +1002,28 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
         AgentLiveHelpers.load_conversation(socket, 123, scope: scope)
     end
 
-    test "unsubscribes from previous conversation when switching" do
-      socket = new_socket(%{conversation_id: 100}, [], connected: true)
+    test "unsubscribes from previous agent when switching" do
+      previous_subs = %{
+        {:agent, "agent-old"} => %{
+          channel: :main,
+          server_pid: self(),
+          monitor_ref: nil,
+          client_ref: make_ref(),
+          state: :subscribed
+        }
+      }
+
+      socket =
+        new_socket(
+          %{
+            conversation_id: 100,
+            agent_id: "agent-old",
+            sagents_subs: previous_subs
+          },
+          [],
+          connected: true
+        )
+
       scope = {:user, 1}
 
       Conversations
@@ -974,13 +1031,16 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       |> stub(:load_display_messages, fn _, _ -> [] end)
       |> stub(:load_todos, fn _, _ -> [] end)
 
+      Sagents.Subscriber
+      |> expect(:unsubscribe_from_agent, fn _subs, agent_id ->
+        assert agent_id == "agent-old"
+        %{}
+      end)
+      |> stub(:subscribe_to_agent, fn subs, _ -> subs end)
+
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
-      |> expect(:unsubscribe_from_conversation, fn conv_id ->
-        assert conv_id == 100
-        :ok
-      end)
-      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
+      |> stub(:track_conversation_viewer, fn _, _ -> {:ok, :ref} end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
@@ -991,7 +1051,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
           user_id: 1
         )
 
-      # Should have new conversation loaded
       assert result.assigns.conversation_id == 123
     end
 
@@ -1004,10 +1063,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       |> stub(:load_display_messages, fn _, _ -> [] end)
       |> stub(:load_todos, fn _, _ -> [] end)
 
+      Sagents.Subscriber
+      |> stub(:unsubscribe_from_agent, fn _, _ -> raise "Should not be called" end)
+      |> stub(:subscribe_to_agent, fn subs, _ -> subs end)
+
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
-      |> stub(:unsubscribe_from_conversation, fn _ -> raise "Should not be called" end)
-      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
+      |> stub(:track_conversation_viewer, fn _, _ -> {:ok, :ref} end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
@@ -1030,15 +1092,16 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _ -> "agent-123" end)
-      |> stub(:ensure_subscribed_to_conversation, fn _ -> :ok end)
       |> stub(:track_conversation_viewer, fn _, _ ->
         {:error, {:already_tracked, :ref, :meta, :data}}
       end)
 
+      Sagents.Subscriber
+      |> stub(:subscribe_to_agent, fn subs, _ -> subs end)
+
       Sagents.AgentServer
       |> stub(:get_status, fn _ -> :not_running end)
 
-      # Should not raise
       {:ok, result} =
         AgentLiveHelpers.load_conversation(socket, 123,
           scope: scope,

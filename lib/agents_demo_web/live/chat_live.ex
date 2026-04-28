@@ -6,6 +6,7 @@ defmodule AgentsDemoWeb.ChatLive do
 
   alias Sagents.AgentServer
   alias Sagents.FileSystemServer
+  alias Sagents.Subscriber
   alias LangChain.Message
   alias AgentsDemo.Conversations
   alias AgentsDemo.Agents.Coordinator
@@ -24,6 +25,11 @@ defmodule AgentsDemoWeb.ChatLive do
           # Subscribe to filesystem changes for real-time updates
           if connected?(socket) do
             FileSystemServer.subscribe(fs_scope)
+
+            # Subscribe to the agent presence topic so presence_diff
+            # broadcasts can fulfill any pending agent subscription
+            # (e.g. after a Horde migration or restart).
+            Phoenix.PubSub.subscribe(AgentsDemo.PubSub, Subscriber.presence_topic())
           end
 
           fs_scope
@@ -134,24 +140,14 @@ defmodule AgentsDemoWeb.ChatLive do
             socket
         end
 
-      conversation_id = socket.assigns.conversation_id
-      filesystem_scope = socket.assigns.filesystem_scope
-      timezone = socket.assigns.timezone
-
-      # Ensure agent is running (seamless start if not)
-      # Coordinator.start_conversation_session is idempotent
-      case Coordinator.start_conversation_session(conversation_id,
-             filesystem_scope: filesystem_scope,
-             scope: socket.assigns.current_scope,
-             timezone: timezone
-           ) do
-        {:ok, session} ->
-          # Create LangChain Message
+      # Ensure the agent is running and we are subscribed to it. Idempotent
+      # For a brand-new conversation (created above) this is the place
+      # where the agent first starts.
+      case ensure_session_running(socket) do
+        {:ok, socket, agent_id} ->
           langchain_message = Message.new_user!(message_text)
 
-          # Add message to AgentServer (will save and broadcast via PubSub)
-          # (Subscription already active from load_conversation)
-          case AgentServer.add_message(session.agent_id, langchain_message) do
+          case AgentServer.add_message(agent_id, langchain_message) do
             :ok ->
               Logger.info("Agent execution started")
 
@@ -159,9 +155,6 @@ defmodule AgentsDemoWeb.ChatLive do
                socket
                |> assign(:input, "")
                |> assign(:loading, true)}
-
-            # Note: No stream_insert here!
-            # Display happens when we receive {:display_message_saved, msg} event
 
             {:error, reason} ->
               Logger.error("Failed to execute agent: #{inspect(reason)}")
@@ -467,22 +460,11 @@ defmodule AgentsDemoWeb.ChatLive do
 
   @impl true
   def handle_event("wake_agent", _params, socket) do
-    conversation_id = socket.assigns.conversation_id
-    filesystem_scope = socket.assigns.filesystem_scope
-    timezone = socket.assigns.timezone
+    Logger.info("Waking agent for conversation #{socket.assigns.conversation_id} (debug mode)")
 
-    Logger.info("Waking agent for conversation #{conversation_id} (debug mode)")
-
-    # Start or ensure agent session is running (idempotent operation)
-    # This loads the saved agent state into memory without executing
-    # Once started, the agent will broadcast status changes and the button will disappear
-    case Coordinator.start_conversation_session(conversation_id,
-           filesystem_scope: filesystem_scope,
-           scope: socket.assigns.current_scope,
-           timezone: timezone
-         ) do
-      {:ok, session} ->
-        Logger.info("Agent woken successfully: #{session.agent_id}")
+    case ensure_session_running(socket) do
+      {:ok, socket, agent_id} ->
+        Logger.info("Agent woken successfully: #{agent_id}")
         {:noreply, put_flash(socket, :info, "Agent activated and ready for debugging")}
 
       {:error, reason} ->
@@ -620,6 +602,16 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, socket) do
+    {:noreply, AgentLiveHelpers.handle_publisher_down(socket, ref, reason)}
+  end
+
+  @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff", payload: payload}, socket) do
+    {:noreply, AgentLiveHelpers.handle_presence_diff(socket, payload)}
+  end
+
+  @impl true
   def handle_info({:file_system, {:file_moved, old_path, new_path}}, socket) do
     Logger.debug("FileSystem event file_moved: #{old_path} -> #{new_path}")
 
@@ -671,10 +663,26 @@ defmodule AgentsDemoWeb.ChatLive do
     :ok
   end
 
-  # Load conversation from database using helper
+  # Action path delegate: Coordinator.ensure_session_running/1 takes a state
+  # map (reusable from non-LiveView callers like a GraphQL bridge GenServer)
+  # and returns changed. `Phoenix.Component.assign/2` accepts a map and
+  # threads each key through `__changed__` for proper re-render diffing.
+  defp ensure_session_running(socket) do
+    case Coordinator.ensure_session_running(socket.assigns) do
+      {:ok, %{agent_id: agent_id} = changed} ->
+        {:ok, assign(socket, changed), agent_id}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Load path: subscribe-only via the helper. No factory config; if the
+  # agent isn't running, the sub is recorded as :pending and auto-upgrades
+  # via presence_diff once the agent appears.
   defp load_conversation(socket, conversation_id) do
     scope = socket.assigns.current_scope
-    user_id = socket.assigns.current_scope.user.id
+    user_id = scope.user.id
 
     case AgentLiveHelpers.load_conversation(socket, conversation_id,
            scope: scope,
@@ -762,13 +770,7 @@ defmodule AgentsDemoWeb.ChatLive do
 
         agent_id = Coordinator.conversation_agent_id(conversation.id)
 
-        # Subscribe to agent events (works even if agent not running!)
-        # Using ensure_* versions - idempotent, safe to call multiple times
         if connected?(socket) do
-          :ok = Coordinator.ensure_subscribed_to_conversation(conversation.id)
-          Logger.debug("Ensured subscription to agent events for conversation #{conversation.id}")
-
-          # Track presence - this enables smart agent shutdown
           user_id = socket.assigns.current_scope.user.id
           {:ok, _ref} = Coordinator.track_conversation_viewer(conversation.id, user_id)
           Logger.debug("Tracking presence for conversation #{conversation.id}, user #{user_id}")
