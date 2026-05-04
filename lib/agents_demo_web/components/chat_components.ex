@@ -610,6 +610,10 @@ defmodule AgentsDemoWeb.ChatComponents do
             hitl_decision={get_in(@message.content, ["hitl_decision"])}
           />
         <% end %>
+      <% "notification" -> %>
+        <div class="px-4 py-1 text-sm italic text-[var(--color-text-secondary)]">
+          {get_in(@message.content, ["text"])}
+        </div>
       <% _other -> %>
         <.text_message
           message={@message}

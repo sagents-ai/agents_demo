@@ -102,4 +102,12 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistence do
   def resolve_tool_result(scope, tool_call_id, result_content, _context) do
     AgentsDemo.Conversations.resolve_interrupted_tool_result(scope, tool_call_id, result_content)
   end
+
+  @impl true
+  def save_synthetic_message(_scope, _attrs, %{conversation_id: nil}),
+    do: {:error, :no_conversation}
+
+  def save_synthetic_message(scope, attrs, %{conversation_id: conversation_id}) do
+    AgentsDemo.Conversations.append_display_message(scope, conversation_id, attrs)
+  end
 end
