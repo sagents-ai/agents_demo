@@ -235,7 +235,7 @@ defmodule AgentsDemo.Agents.Coordinator do
         new_subs =
           case Map.get(subs, {:agent, agent_id}) do
             %{state: :subscribed, server_pid: ^pid} -> subs
-            _ -> Subscriber.subscribe_to_agent(subs, agent_id)
+            _other -> Subscriber.subscribe_to_agent(subs, agent_id)
           end
 
         {:ok, %{sagents_subs: new_subs, agent_id: agent_id}}

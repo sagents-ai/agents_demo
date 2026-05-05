@@ -279,7 +279,7 @@ defmodule AgentsDemo.Agents.Factory do
               %LLMChain{chain | messages:
                 LangChain.Utils.replace_system_message!(chain.messages, new_prompt)}
 
-            _ ->
+            _other ->
               chain
           end
         end

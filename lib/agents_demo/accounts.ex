@@ -127,7 +127,7 @@ defmodule AgentsDemo.Accounts do
              Repo.delete_all(from(UserToken, where: [user_id: ^user.id, context: ^context])) do
         {:ok, user}
       else
-        _ -> {:error, :transaction_aborted}
+        _other -> {:error, :transaction_aborted}
       end
     end)
   end
@@ -224,7 +224,7 @@ defmodule AgentsDemo.Accounts do
          {user, _token} <- Repo.one(query) do
       user
     else
-      _ -> nil
+      _other -> nil
     end
   end
 

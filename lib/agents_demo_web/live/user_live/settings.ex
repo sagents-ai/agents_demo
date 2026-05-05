@@ -136,7 +136,7 @@ defmodule AgentsDemoWeb.UserLive.Settings do
         {:ok, _user} ->
           put_flash(socket, :info, "Email changed successfully.")
 
-        {:error, _} ->
+        {:error, _reason} ->
           put_flash(socket, :error, "Email change link is invalid or it has expired.")
       end
 

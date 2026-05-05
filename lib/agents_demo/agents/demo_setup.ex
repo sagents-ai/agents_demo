@@ -92,7 +92,7 @@ defmodule AgentsDemo.Agents.DemoSetup do
         partition = System.get_env("MIX_TEST_PARTITION", "")
         Path.join([System.tmp_dir!(), "agents_demo_test#{partition}", "user_files"])
 
-      _ ->
+      _other ->
         # Development and production use project root
         Path.join(File.cwd!(), "user_files")
     end

@@ -1,4 +1,5 @@
 defmodule AgentsDemo.Accounts.UserNotifier do
+  @moduledoc false
   import Swoosh.Email
 
   alias AgentsDemo.Mailer
@@ -44,7 +45,7 @@ defmodule AgentsDemo.Accounts.UserNotifier do
   def deliver_login_instructions(user, url) do
     case user do
       %User{confirmed_at: nil} -> deliver_confirmation_instructions(user, url)
-      _ -> deliver_magic_link_instructions(user, url)
+      _other -> deliver_magic_link_instructions(user, url)
     end
   end
 

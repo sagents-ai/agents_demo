@@ -29,7 +29,7 @@ defmodule AgentsDemoWeb.ChatLiveAgentStartupTest do
   defp submit_message(view, message) do
     # Wait for input to be enabled (agent_status != :running)
     # Poll up to 1 second
-    Enum.reduce_while(1..10, nil, fn _attempt, _acc ->
+    _result = Enum.reduce_while(1..10, nil, fn _attempt, _acc ->
       socket_assigns = :sys.get_state(view.pid).socket.assigns
 
       if socket_assigns[:agent_status] in [:idle, :cancelled, :error, nil] do

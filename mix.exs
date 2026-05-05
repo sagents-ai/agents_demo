@@ -78,7 +78,8 @@ defmodule AgentsDemo.MixProject do
       {:mdex, "~> 0.11"},
       {:lumis, "~> 0.1"},
       {:tidewave, "~> 0.5", only: :dev},
-      {:dotenvy, "~> 1.1.0"}
+      {:dotenvy, "~> 1.1.0"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -101,7 +102,7 @@ defmodule AgentsDemo.MixProject do
         "esbuild agents_demo --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "credo", "test"]
     ]
   end
 end

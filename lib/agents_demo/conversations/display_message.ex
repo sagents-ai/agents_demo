@@ -165,7 +165,7 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
       {"tool_result", %{"tool_call_id" => _, "name" => _, "content" => _}} -> changeset
       # Allow nil during build
       {nil, _} -> changeset
-      _ -> add_error(changeset, :content, "invalid structure for content_type #{content_type}")
+      _other -> add_error(changeset, :content, "invalid structure for content_type #{content_type}")
     end
   end
 

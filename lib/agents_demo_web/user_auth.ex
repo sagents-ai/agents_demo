@@ -1,4 +1,5 @@
 defmodule AgentsDemoWeb.UserAuth do
+  @moduledoc false
   use AgentsDemoWeb, :verified_routes
 
   import Plug.Conn
@@ -148,13 +149,13 @@ defmodule AgentsDemoWeb.UserAuth do
     |> clear_session()
   end
 
-  defp maybe_write_remember_me_cookie(conn, token, %{"remember_me" => "true"}, _),
+  defp maybe_write_remember_me_cookie(conn, token, %{"remember_me" => "true"}, _remember_me),
     do: write_remember_me_cookie(conn, token)
 
   defp maybe_write_remember_me_cookie(conn, token, _params, true),
     do: write_remember_me_cookie(conn, token)
 
-  defp maybe_write_remember_me_cookie(conn, _token, _params, _), do: conn
+  defp maybe_write_remember_me_cookie(conn, _token, _params, _remember_me), do: conn
 
   defp write_remember_me_cookie(conn, token) do
     conn
