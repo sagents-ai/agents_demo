@@ -17,27 +17,49 @@ defmodule AgentsDemo.Agents.Coordinator do
   returns a `:pending` entry when it isn't, which auto-upgrades to
   `:subscribed` via `presence_diff` once the agent appears.
 
+      subs =
+        Sagents.Subscriber.subscribe_to_agent(
+          subs,
+          AgentsDemo.Agents.Coordinator.conversation_agent_id(conversation_id)
+        )
+
   ### Action path (factory config required)
 
   When the user takes an action that requires the agent to actually do
-  work, call `ensure_session_running/1` with a state map. The function
+  work, call `ensure_agent_session_running/1` with a state map. The function
   starts the agent (if it isn't running) with the host seeded as an
   initial subscriber to close the race against `init/1`/`handle_continue/2`
   broadcasts, and upgrades the local subs map to `:subscribed`.
 
       # LiveView
-      case AgentsDemo.Agents.Coordinator.ensure_session_running(socket.assigns) do
+      case AgentsDemo.Agents.Coordinator.ensure_agent_session_running(socket.assigns) do
         {:ok, changes} -> assign(socket, changes)
         {:error, reason} -> ...
       end
 
       # GenServer
-      case AgentsDemo.Agents.Coordinator.ensure_session_running(state) do
+      case AgentsDemo.Agents.Coordinator.ensure_agent_session_running(state) do
         {:ok, changes} -> {:noreply, Map.merge(state, changes)}
         {:error, reason} -> ...
       end
 
   See `Sagents.FactoryRouter` for routing among multiple factories.
+
+  ## Threading per-request data into the FactoryConfig
+
+  Per-request fields (`:timezone`, `:tool_context`, project context,
+  etc.) flow through the explicit `request_opts` keyword list passed as
+  the second arg to `ensure_agent_session_running/2`. They are forwarded to
+  the router as its third argument and consumed by your
+  `*Config.from_inputs/1`:
+
+      Coordinator.ensure_agent_session_running(socket.assigns,
+        timezone: socket.assigns.timezone,
+        tool_context: %{user_id: user_id}
+      )
+
+  Add new request-scoped fields to your FactoryConfig and pass them
+  through this same arg — no magic state-map keys.
   """
 
   @presence_module AgentsDemoWeb.Presence
@@ -55,7 +77,7 @@ defmodule AgentsDemo.Agents.Coordinator do
   @doc """
   Start (or return the existing) agent session for a conversation.
 
-  Idempotent. Most callers should use `ensure_session_running/1` instead,
+  Idempotent. Most callers should use `ensure_agent_session_running/1` instead,
   which composes this with subscription bookkeeping.
 
   See `Sagents.Session.start/3` for accepted options.
@@ -64,12 +86,19 @@ defmodule AgentsDemo.Agents.Coordinator do
     do: Sagents.Session.start(@config, conversation_id, opts)
 
   @doc """
-  Ensure the agent session for `state.conversation_id` is running and that
-  the calling process is subscribed to its events. See
-  `Sagents.Session.ensure_running/2`.
+  Ensure the agent session for `state.conversation_id` is running and
+  that the calling process is subscribed to its events.
+
+  Per-request data for the FactoryConfig flows through the explicit
+  `request_opts` keyword list, not the state map. See
+  `Sagents.Session.ensure_running/3`.
+
+      AgentsDemo.Agents.Coordinator.ensure_agent_session_running(socket.assigns,
+        timezone: socket.assigns.timezone
+      )
   """
-  def ensure_session_running(state),
-    do: Sagents.Session.ensure_running(@config, state)
+  def ensure_agent_session_running(state, request_opts \\ []),
+    do: Sagents.Session.ensure_running(@config, state, request_opts: request_opts)
 
   @doc """
   Stop an agent session for a conversation.

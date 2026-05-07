@@ -38,11 +38,13 @@ defmodule AgentsDemo.Agents.DemoSetup do
 
   ## Examples
 
-      {:ok, scope} = DemoSetup.ensure_user_filesystem(user_id)
+      {:ok, scope_key} = DemoSetup.ensure_user_filesystem(user_id)
       # => {:ok, {:user, 123}}
 
-      # Use scope when starting conversations
-      {:ok, session} = Coordinator.start_conversation_session(conv_id, filesystem_scope: scope)
+  Note: callers don't pass this scope into `start_conversation_session/2`.
+  `AgentsDemo.Agents.Factory.create_agent/2` derives the same key from
+  the FactoryConfig's `:scope` and ensures the filesystem is up before
+  wiring the FileSystem middleware.
   """
   def ensure_user_filesystem(user_id) do
     # Setup directory structure and get storage path

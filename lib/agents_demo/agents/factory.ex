@@ -1,10 +1,16 @@
 defmodule AgentsDemo.Agents.Factory do
+  @behaviour Sagents.Factory
+
   @moduledoc """
   Factory for creating agents with consistent configuration.
 
-  This module centralizes agent creation, ensuring all agents use the same
-  model, middleware stack, and base configuration. The Coordinator calls
-  `create_agent/1` when starting a conversation session.
+  Pairs with `AgentsDemo.Agents.FactoryConfig` — read that module to know
+  what's required and how to build a config. This factory just consumes
+  `%FactoryConfig{}` and produces a `%Sagents.Agent{}`.
+
+  This module centralizes agent creation, ensuring all agents use the
+  same model, middleware stack, and base configuration. Sagents.Session
+  calls `create_agent/2` when starting a conversation session.
 
   This Factory is automatically configured for your persistence layer:
   - Owner type: :user
@@ -13,13 +19,16 @@ defmodule AgentsDemo.Agents.Factory do
 
   ## Customization
 
-  - Change model provider in `get_model_config/0`
-  - Configure fallbacks in `get_fallback_models/0`
-  - Configure title generation model in `get_title_model/0`
-  - Modify system prompt in `base_system_prompt/0`
-  - Add/remove middleware in `build_middleware/2`
-  - Add custom tools in `create_agent/1` under the `:tools` key
-  - Configure HITL in `default_interrupt_on/0`
+  Each helper takes the `%FactoryConfig{}` config (`c`)
+  so you can branch on per-request fields without re-threading args:
+
+  - Change model provider in `build_model/1`
+  - Configure fallbacks in `get_fallback_models/1`
+  - Configure title generation model in `get_title_model/1`
+  - Modify system prompt in `base_system_prompt/1`
+  - Add/remove middleware in `build_middleware/1`
+  - Add custom tools in `build_tools/1`
+  - Configure HITL in `default_interrupt_on/1`
 
   ## Understanding the Default Middleware
 
@@ -40,25 +49,9 @@ defmodule AgentsDemo.Agents.Factory do
 
   ## Filesystem Scoping
 
-  The FileSystem middleware supports flexible scoping to control file isolation.
-
-  **For user-facing interactive agents (recommended):**
-  - **User-scoped**: `filesystem_scope: {:user, user_id}`
-    - Files persist across all conversations for the same user
-    - Enables true long-term memory and file accumulation
-    - This is the typical pattern for chat applications
-
-  **Other scoping options:**
-  - **Project-scoped**: `filesystem_scope: {:project, project_id}`
-    - Files shared within a project across multiple users and conversations
-
-  - **Agent-scoped**: `filesystem_scope: nil` (defaults to `{:agent, agent_id}`)
-    - Files isolated per conversation - typically too limiting for user-facing agents
-    - May be appropriate for non-interactive batch processing or isolated task execution
-
-  - **Custom scoping**: Use any tuple like `{:team, team_id}` or `{:session, session_id}`
-
-  **Important:** The Coordinator should pass the appropriate scope when calling `create_agent/1`.
+  Files are scoped to the owner (`{:user, user_id}`)
+  so they persist across all conversations for that owner. Edit
+  `ensure_filesystem_for/1` to change the scoping strategy.
 
   """
 
@@ -67,12 +60,13 @@ defmodule AgentsDemo.Agents.Factory do
   # alias LangChain.ChatModels.ChatOpenAI
   # Uncomment for Bedrock:
   # alias LangChain.Utils.BedrockConfig
+  alias AgentsDemo.Agents.DemoSetup
+  alias AgentsDemo.Middleware.InjectCurrentTime
+  alias AgentsDemo.Middleware.WebToolMiddleware
   alias Sagents.Agent
   alias Sagents.Middleware.ConversationTitle
   alias Sagents.Middleware.HumanInTheLoop
-  alias AgentsDemo.Agents.DemoSetup
-  alias AgentsDemo.Middleware.WebToolMiddleware
-  alias AgentsDemo.Middleware.InjectCurrentTime
+  alias AgentsDemo.Agents.FactoryConfig
 
   require Logger
 
@@ -83,93 +77,56 @@ defmodule AgentsDemo.Agents.Factory do
   # Primary model for agent conversations
   # See: https://docs.anthropic.com/en/docs/models-overview
   @main_model "claude-sonnet-4-6"
-  # @main_model "anthropic:claude-sonnet-4-6"
 
   # Title generation uses a lighter/faster model for cost efficiency
   # Haiku is ~10x cheaper than Sonnet and sufficient for generating titles
   @title_model "claude-haiku-4-5"
-  # @title_model "anthropic:claude-haiku-4-5"
-
-  # For OpenAI via ChatReqLLM, uncomment and use:
-  # @main_model "openai:gpt-4o"
-  # @title_model "openai:gpt-4o-mini"
 
   @doc """
-  Creates an agent with the standard configuration.
+  Builds a `%Sagents.Agent{}` from the supplied config.
 
-  ## Options
-
-  - `:agent_id` - Required. Unique identifier for this agent. The library
-    injects this from `agent_id_fun.(conversation_id)` if not present.
-  - `:scope` - Integrator-defined scope struct (e.g., `%MyApp.Accounts.Scope{}`).
-    In production this should be passed by the Coordinator from the caller's session.
-    `nil` is allowed (for tests, admin scripts, or background jobs without a user
-    context) but tenant-scoped queries downstream will have no owner to filter by.
-    Set on `agent.scope`; sagents propagates to persistence callbacks (arg #1) and
-    to tool `context.scope`.
-  - `:interrupt_on` - Optional. Map of tool names requiring approval.
-    Pass `nil` to disable HITL entirely.
-  - `:tool_context` - Optional. Map of caller-supplied data passed to tool functions
-    via `LLMChain.custom_context`. Defaults to `%{}`. Example: `%{user_id: 42}`.
-
-  ## Returns
-
-  Returns `{:ok, agent, session_opts}` where `session_opts` is a keyword
-  list. The library recognizes one key:
-
-  - `:initial_todos` — list of `Sagents.Todo` structs to seed onto fresh
-    state. Ignored when persisted state is restored.
-
-  All other keys are app-internal — `Sagents.Session` plumbs the keyword
-  list through but does not inspect it.
-
+  - `agent_id` is system-supplied by `Sagents.Session` (derived from
+    `conversation_id` via the host's `agent_id_fun`).
+  - `config` is a `%FactoryConfig{}` produced by the
+    paired `FactoryRouter` (typically via
+    `FactoryConfig.from_inputs/1 |> FactoryConfig.build/1`).
   """
-  def create_agent(opts \\ []) do
-    agent_id = Keyword.fetch!(opts, :agent_id)
-    scope = Keyword.get(opts, :scope)
-    timezone = Keyword.get(opts, :timezone, "UTC")
-    interrupt_on = Keyword.get(opts, :interrupt_on, default_interrupt_on())
-    tool_context = Keyword.get(opts, :tool_context, %{})
-
-    # The factory owns its own filesystem setup: derive a user-scoped
-    # filesystem from the caller's scope and ensure the FileSystemServer
-    # is running before wiring it into the FileSystem middleware.
-    # `ensure_user_filesystem/1` is idempotent.
-    filesystem_scope = ensure_filesystem_for(scope)
-
-    case Agent.new(
-           %{
-             agent_id: agent_id,
-             model: get_model_config(),
-             base_system_prompt: base_system_prompt(),
-             middleware: build_middleware(filesystem_scope, interrupt_on, timezone, scope),
-             name: "Demo Agent",
-             fallback_models: get_fallback_models(),
-             before_fallback: get_before_fallback(),
-             # Add any custom tools here (tools not provided by middleware)
-             tools: [],
-             tool_context: tool_context,
-             scope: scope
-           },
-           # Since we specify the full middleware stack, don't add defaults
-           replace_default_middleware: true
-         ) do
+  @impl Sagents.Factory
+  def create_agent(agent_id, %FactoryConfig{} = c) do
+    Agent.new(
+      %{
+        agent_id: agent_id,
+        scope: c.scope,
+        model: build_model(c),
+        base_system_prompt: base_system_prompt(c),
+        middleware: build_middleware(c),
+        name: "Demo Agent",
+        fallback_models: get_fallback_models(c),
+        before_fallback: get_before_fallback(c),
+        # Add any custom tools here (tools not provided by middleware)
+        tools: build_tools(c),
+        tool_context: c.tool_context
+      },
+      # Since we specify the full middleware stack, don't add defaults
+      replace_default_middleware: true
+    )
+    |> case do
       {:ok, agent} -> {:ok, agent, []}
-      {:error, _} = err -> err
+      {:error, _reason} = err -> err
     end
   end
 
   # ---------------------------------------------------------------------------
-  # Filesystem setup
+  # Filesystem
   # ---------------------------------------------------------------------------
 
-  # Returns the `filesystem_scope` tuple to wire into the FileSystem
-  # middleware, ensuring the underlying `FileSystemServer` is running for
-  # that scope. With a user scope present, the agent shares one
-  # user-scoped filesystem across all conversations (long-term memory).
-  # Without a user scope (tests, admin scripts) the middleware falls back
-  # to its default `{:agent, agent_id}`.
-  defp ensure_filesystem_for(%{user: %{id: user_id}}) when not is_nil(user_id) do
+  # Ensure the owner-scoped filesystem is running before the agent boots.
+  # Returns a `scope_key` tuple to pass into the FileSystem middleware, or
+  # `nil` to fall back to agent-scoped filesystem.
+  defp ensure_filesystem_for(%FactoryConfig{
+         scope: %{user: %{id: user_id}}
+       })
+       when not is_nil(user_id) do
     case DemoSetup.ensure_user_filesystem(user_id) do
       {:ok, scope_key} ->
         scope_key
@@ -184,15 +141,16 @@ defmodule AgentsDemo.Agents.Factory do
     end
   end
 
-  defp ensure_filesystem_for(_other), do: nil
+  defp ensure_filesystem_for(_c), do: nil
 
   # ---------------------------------------------------------------------------
   # Model Configuration
   # ---------------------------------------------------------------------------
 
   # Primary model configuration.
-  # Modify this function to switch providers or models.
-  defp get_model_config do
+  # Modify this function to switch providers or models. Branch on `c` to
+  # vary the model per request (e.g. agent kind, plan tier).
+  defp build_model(%FactoryConfig{} = _c) do
     ChatAnthropic.new!(%{
       model: @main_model,
       api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
@@ -203,122 +161,21 @@ defmodule AgentsDemo.Agents.Factory do
         budget_tokens: 3_000
       }
     })
-
-    # OpenAI alternative:
-    # ChatOpenAI.new!(%{
-    #   model: @main_model,
-    #   api_key: System.fetch_env!("OPENAI_API_KEY"),
-    #   stream: true
-    # })
   end
 
-  # Fallback models - same model on different infrastructure for resilience.
-  # These are used when the primary provider is unavailable.
-  #
-  # This function is called by create_agent/1 and passed to the Agent struct.
-  #
-  # Note: To use Bedrock fallback, configure AWS credentials in config.exs:
-  #
-  #   config :langchain, :bedrock,
-  #     aws_access_key_id: System.get_env("AWS_ACCESS_KEY_ID"),
-  #     aws_secret_access_key: System.get_env("AWS_SECRET_ACCESS_KEY"),
-  #     aws_region: System.get_env("AWS_REGION", "us-east-1")
-  #
-  # Then uncomment the BedrockConfig alias at the top of this file.
-  #
-  @doc """
-  Returns the list of fallback models to use when the primary model fails.
-
-  This is called automatically by `create_agent/1`. The fallback models are
-  used in order when the primary model encounters an error that should be
-  retried (rate limits, service unavailable, etc.).
-
-  **Cost Considerations:**
-  - Fallbacks are only used when the primary model fails
-  - Each fallback attempt incurs API costs
-  - Monitor your primary model's error rate to assess fallback usage
-  - Consider using cheaper models as fallbacks (e.g., Haiku instead of Sonnet)
-
-  See the implementation for examples of configuring Bedrock and Azure fallbacks.
-  """
-  def get_fallback_models do
-    [
-      # Anthropic via AWS Bedrock (same Claude model, different provider)
-      # Uncomment when Bedrock is configured:
-      # ChatAnthropic.new!(%{
-      #   model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-      #   bedrock: BedrockConfig.from_application_env!(),
-      #   stream: true
-      # })
-
-      # OpenAI via Azure alternative:
-      # ChatOpenAI.new!(%{
-      #   model: @main_model,
-      #   endpoint: "https://your-resource.openai.azure.com",
-      #   api_key: System.fetch_env!("AZURE_OPENAI_API_KEY"),
-      #   api_version: "2024-02-15-preview"
-      # })
-    ]
+  defp get_fallback_models(%FactoryConfig{} = _c) do
+    []
   end
 
-  @doc """
-  Returns an optional function to modify the chain before each LLM attempt.
-
-  This function is called before EVERY attempt, including the first. This makes
-  it useful for provider-specific modifications like:
-  - Swapping system prompts for different providers (Anthropic vs OpenAI formatting)
-  - Adjusting context or parameters based on the model
-  - Logging or telemetry per attempt
-
-  ## Function Signature
-
-  The function receives an `LLMChain.t()` and returns a modified `LLMChain.t()`:
-
-      fn %LLMChain{} = chain -> modified_chain end
-
-  ## Example: Provider-Specific System Prompts
-
-      def get_before_fallback do
-        fn chain ->
-          case chain.llm do
-            %ChatAnthropic{} ->
-              # Anthropic-specific system prompt
-              new_prompt = Message.new_system!("Anthropic-optimized prompt")
-              %LLMChain{chain | messages:
-                LangChain.Utils.replace_system_message!(chain.messages, new_prompt)}
-
-            %ChatOpenAI{} ->
-              # OpenAI-specific system prompt
-              new_prompt = Message.new_system!("OpenAI-optimized prompt")
-              %LLMChain{chain | messages:
-                LangChain.Utils.replace_system_message!(chain.messages, new_prompt)}
-
-            _other ->
-              chain
-          end
-        end
-      end
-
-  Returns a function `(LLMChain.t() -> LLMChain.t())` or `nil` to skip.
-  """
-  def get_before_fallback do
+  defp get_before_fallback(%FactoryConfig{} = _c) do
     nil
-
-    # Example implementation (commented out):
-    # fn chain ->
-    #   # Example: Log which model is being attempted
-    #   Logger.debug("Attempting LLM call with \#{inspect(chain.llm)}")
-    #   chain
-    # end
   end
 
   # ---------------------------------------------------------------------------
   # Title Generation Model
   # ---------------------------------------------------------------------------
 
-  # Title generation uses a lighter/faster model for cost efficiency.
-  # Haiku is ~10x cheaper than Sonnet and sufficient for generating titles.
-  defp get_title_model do
+  defp get_title_model(%FactoryConfig{} = _c) do
     ChatAnthropic.new!(%{
       model: @title_model,
       api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
@@ -327,26 +184,15 @@ defmodule AgentsDemo.Agents.Factory do
     })
   end
 
-  # Fallback models for title generation
-  defp get_title_fallbacks do
-    [
-      # Uncomment when Bedrock is configured (also uncomment BedrockConfig alias):
-      # ChatAnthropic.new!(%{
-      #   model: @title_fallback_model,
-      #   bedrock: BedrockConfig.from_application_env!(),
-      #   temperature: 1,
-      #   stream: false
-      # })
-    ]
-  end
+  defp get_title_fallbacks(%FactoryConfig{} = _c), do: []
 
   # ---------------------------------------------------------------------------
   # System Prompt
   # ---------------------------------------------------------------------------
 
-  # Base system prompt for all agents.
-  # Customize this for your agent's purpose and personality.
-  defp base_system_prompt do
+  # Base system prompt for all agents. Branch on `c` for per-request
+  # customizations (e.g. inject project context).
+  defp base_system_prompt(%FactoryConfig{} = _c) do
     """
     You are a helpful AI assistant with access to a persistent memory system and web search capabilities.
 
@@ -370,8 +216,7 @@ defmodule AgentsDemo.Agents.Factory do
   #   - `true` - Enable with default decisions (approve, edit, reject)
   #   - `false` - No interruption for this tool
   #   - `%{allowed_decisions: [:approve, :reject]}` - Custom decisions
-  #
-  defp default_interrupt_on do
+  defp default_interrupt_on(%FactoryConfig{} = _c) do
     %{
       "delete_file" => true
       # "write_file" => true,
@@ -380,41 +225,28 @@ defmodule AgentsDemo.Agents.Factory do
   end
 
   # ---------------------------------------------------------------------------
+  # Tools
+  # ---------------------------------------------------------------------------
+
+  # Custom (non-middleware-provided) tools. Branch on `c` to enable/disable
+  # tools per request.
+  defp build_tools(%FactoryConfig{} = _c), do: []
+
+  # ---------------------------------------------------------------------------
   # Middleware Configuration
   # ---------------------------------------------------------------------------
 
-  # Build the middleware stack.
-  #
-  # This replicates the default stack from `Sagents.Agent.build_default_middleware/3`:
-  #   1. TodoList - Task management with write_todos tool
-  #   2. ConversationTitle - Auto-generate conversation titles (async, so positioned early)
-  #   3. FileSystem - Virtual filesystem (ls, read_file, write_file, etc.)
-  #   4. SubAgent - Delegate to specialized child agents
-  #   5. Summarization - Compress long conversations to stay within token limits
-  #   6. PatchToolCalls - Fix dangling tool calls from interrupted conversations
-  #
-  # HumanInTheLoop is conditionally added based on `interrupt_on` configuration.
-  #
-  # Order matters! Early middleware sees messages first (before_model) and
-  # processes responses last (after_model).
-  #
-  defp build_middleware(filesystem_scope, interrupt_on, timezone, scope) do
-    [
-      # Task management - gives the agent a todo list for tracking work
-      Sagents.Middleware.TodoList,
+  defp build_middleware(%FactoryConfig{} = c) do
+    filesystem_scope = ensure_filesystem_for(c)
+    interrupt_on = default_interrupt_on(c)
 
-      # ConversationTitle - auto-generate titles after the first exchange.
-      # Positioned early because it's async and should start as soon as possible.
-      # Uses a lighter/faster model (Haiku) for cost efficiency.
+    [
+      Sagents.Middleware.TodoList,
       {ConversationTitle,
        [
-         chat_model: get_title_model(),
-         fallbacks: get_title_fallbacks()
+         chat_model: get_title_model(c),
+         fallbacks: get_title_fallbacks(c)
        ]},
-
-      # Virtual filesystem - file operations with configurable scope
-      # For user-facing agents, pass {:user, user_id} from the Coordinator
-      # If nil, defaults to {:agent, agent_id} (isolated per conversation)
       {Sagents.Middleware.FileSystem,
        [
          enabled_tools: [
@@ -428,12 +260,6 @@ defmodule AgentsDemo.Agents.Factory do
          ],
          filesystem_scope: filesystem_scope
        ]},
-
-      # SubAgent - spawn child agents for complex tasks
-      # Configure block_middleware to prevent certain middleware from being
-      # inherited by subagents (e.g., Summarization, ConversationTitle).
-      # AskUserQuestion is blocked because sub-agents should complete tasks
-      # autonomously without pausing to quiz the user.
       {Sagents.Middleware.SubAgent,
        [
          block_middleware: [
@@ -445,26 +271,11 @@ defmodule AgentsDemo.Agents.Factory do
            Sagents.Middleware.AskUserQuestion
          ]
        ]},
-
-      # Inject the user's first name into the first user message
-      {AgentsDemo.Middleware.UserContextMiddleware, [scope: scope]},
-
-      # Custom middleware that injects the current time into every user message
-      {InjectCurrentTime, [timezone: timezone]},
-
-      # Custom middleware that adds web_lookup tool that runs in a separate context
+      {AgentsDemo.Middleware.UserContextMiddleware, [scope: c.scope]},
+      {InjectCurrentTime, [timezone: c.timezone]},
       WebToolMiddleware,
-
-      # Summarization - compress long conversations to fit context window
       Sagents.Middleware.Summarization,
-
-      # PatchToolCalls - fix dangling tool calls from interrupted conversations
       Sagents.Middleware.PatchToolCalls,
-
-      # AskUserQuestion - structured questions with typed responses
-      # Gives the agent an `ask_user` tool for presenting single-select,
-      # multi-select, or freeform questions to the user via the interrupt/resume
-      # lifecycle. The UI renders appropriate controls based on response_type.
       Sagents.Middleware.AskUserQuestion
     ]
     # HumanInTheLoop MUST be last. During resume, HITL executes all tools

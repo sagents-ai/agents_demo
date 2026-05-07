@@ -143,7 +143,7 @@ defmodule AgentsDemoWeb.ChatLive do
       # Ensure the agent is running and we are subscribed to it. Idempotent
       # For a brand-new conversation (created above) this is the place
       # where the agent first starts.
-      case ensure_session_running(socket) do
+      case ensure_agent_session_running(socket) do
         {:ok, socket, agent_id} ->
           langchain_message = Message.new_user!(message_text)
 
@@ -462,7 +462,7 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("wake_agent", _params, socket) do
     Logger.info("Waking agent for conversation #{socket.assigns.conversation_id} (debug mode)")
 
-    case ensure_session_running(socket) do
+    case ensure_agent_session_running(socket) do
       {:ok, socket, agent_id} ->
         Logger.info("Agent woken successfully: #{agent_id}")
         {:noreply, put_flash(socket, :info, "Agent activated and ready for debugging")}
@@ -663,12 +663,14 @@ defmodule AgentsDemoWeb.ChatLive do
     :ok
   end
 
-  # Action path delegate: Coordinator.ensure_session_running/1 takes a state
+  # Action path delegate: Coordinator.ensure_agent_session_running/1 takes a state
   # map (reusable from non-LiveView callers like a GraphQL bridge GenServer)
   # and returns changed. `Phoenix.Component.assign/2` accepts a map and
   # threads each key through `__changed__` for proper re-render diffing.
-  defp ensure_session_running(socket) do
-    case Coordinator.ensure_session_running(socket.assigns) do
+  defp ensure_agent_session_running(socket) do
+    request_opts = [timezone: socket.assigns.timezone]
+
+    case Coordinator.ensure_agent_session_running(socket.assigns, request_opts) do
       {:ok, %{agent_id: agent_id} = changed} ->
         {:ok, assign(socket, changed), agent_id}
 
