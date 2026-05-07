@@ -151,21 +151,44 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
     content = get_field(changeset, :content)
 
     case {content_type, content} do
-      {"text", %{"text" => _}} -> changeset
-      {"thinking", %{"text" => _}} -> changeset
-      {"image", %{"url" => _}} -> changeset
-      {"image", %{"data" => _, "mime_type" => _}} -> changeset
-      {"file_reference", %{"path" => _, "name" => _}} -> changeset
-      {"structured_data", %{"format" => _, "data" => _}} -> changeset
-      {"notification", %{"text" => _}} -> changeset
-      {"error", %{"text" => _}} -> changeset
+      {"text", %{"text" => _}} ->
+        changeset
+
+      {"thinking", %{"text" => _}} ->
+        changeset
+
+      {"image", %{"url" => _}} ->
+        changeset
+
+      {"image", %{"data" => _, "mime_type" => _}} ->
+        changeset
+
+      {"file_reference", %{"path" => _, "name" => _}} ->
+        changeset
+
+      {"structured_data", %{"format" => _, "data" => _}} ->
+        changeset
+
+      {"notification", %{"text" => _}} ->
+        changeset
+
+      {"error", %{"text" => _}} ->
+        changeset
+
       # Tool call validation
-      {"tool_call", %{"call_id" => _, "name" => _, "arguments" => _}} -> changeset
+      {"tool_call", %{"call_id" => _, "name" => _, "arguments" => _}} ->
+        changeset
+
       # Tool result validation
-      {"tool_result", %{"tool_call_id" => _, "name" => _, "content" => _}} -> changeset
+      {"tool_result", %{"tool_call_id" => _, "name" => _, "content" => _}} ->
+        changeset
+
       # Allow nil during build
-      {nil, _} -> changeset
-      _other -> add_error(changeset, :content, "invalid structure for content_type #{content_type}")
+      {nil, _} ->
+        changeset
+
+      _other ->
+        add_error(changeset, :content, "invalid structure for content_type #{content_type}")
     end
   end
 

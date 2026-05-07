@@ -262,6 +262,58 @@ defmodule AgentsDemo.ConversationsTest do
     end
   end
 
+  describe "set_interrupt_status/3 and interrupted?/1" do
+    test "set_interrupt_status writes the boolean flag to conversation.metadata" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+
+      assert {:ok, updated} = Conversations.set_interrupt_status(scope, conversation.id, true)
+      assert updated.metadata["interrupted"] == true
+
+      assert {:ok, cleared} = Conversations.set_interrupt_status(scope, conversation.id, false)
+      assert cleared.metadata["interrupted"] == false
+    end
+
+    test "set_interrupt_status preserves existing metadata keys" do
+      scope = user_scope_fixture()
+
+      conversation =
+        conversation_fixture(%{
+          scope: scope,
+          metadata: %{"agent_id" => "agent-001", "tag" => "important"}
+        })
+
+      assert {:ok, updated} = Conversations.set_interrupt_status(scope, conversation.id, true)
+
+      assert updated.metadata == %{
+               "agent_id" => "agent-001",
+               "tag" => "important",
+               "interrupted" => true
+             }
+    end
+
+    test "set_interrupt_status returns :not_found for wrong-scope callers" do
+      owner_scope = user_scope_fixture()
+      other_scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: owner_scope})
+
+      assert {:error, :not_found} =
+               Conversations.set_interrupt_status(other_scope, conversation.id, true)
+    end
+
+    test "interrupted?/1 returns true only when the flag is set to true" do
+      assert Conversations.interrupted?(%Conversation{metadata: %{"interrupted" => true}}) ==
+               true
+
+      assert Conversations.interrupted?(%Conversation{metadata: %{"interrupted" => false}}) ==
+               false
+
+      assert Conversations.interrupted?(%Conversation{metadata: %{}}) == false
+      assert Conversations.interrupted?(%Conversation{metadata: nil}) == false
+      assert Conversations.interrupted?(nil) == false
+    end
+  end
+
   describe "append_display_message/3" do
     test "creates a display message with valid attributes" do
       scope = user_scope_fixture()

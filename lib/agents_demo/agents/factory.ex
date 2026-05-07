@@ -17,7 +17,7 @@ defmodule AgentsDemo.Agents.Factory do
   - Configure fallbacks in `get_fallback_models/0`
   - Configure title generation model in `get_title_model/0`
   - Modify system prompt in `base_system_prompt/0`
-  - Add/remove middleware in `build_middleware/3`
+  - Add/remove middleware in `build_middleware/2`
   - Add custom tools in `create_agent/1` under the `:tools` key
   - Configure HITL in `default_interrupt_on/0`
 
@@ -70,8 +70,11 @@ defmodule AgentsDemo.Agents.Factory do
   alias Sagents.Agent
   alias Sagents.Middleware.ConversationTitle
   alias Sagents.Middleware.HumanInTheLoop
+  alias AgentsDemo.Agents.DemoSetup
   alias AgentsDemo.Middleware.WebToolMiddleware
   alias AgentsDemo.Middleware.InjectCurrentTime
+
+  require Logger
 
   # ---------------------------------------------------------------------------
   # Model Configuration (edit these module attributes to change models)
@@ -96,11 +99,8 @@ defmodule AgentsDemo.Agents.Factory do
 
   ## Options
 
-  - `:agent_id` - Required. Unique identifier for this agent.
-  - `:filesystem_scope` - Required. Scope tuple for filesystem isolation.
-    Examples: `{:user, user_id}`, `{:project, 456}`, `{:team, 789}`.
-    Pass `nil` for agent-scoped (isolated per conversation).
-  - `:timezone` - Optional. IANA timezone string (default: "UTC").
+  - `:agent_id` - Required. Unique identifier for this agent. The library
+    injects this from `agent_id_fun.(conversation_id)` if not present.
   - `:scope` - Integrator-defined scope struct (e.g., `%MyApp.Accounts.Scope{}`).
     In production this should be passed by the Coordinator from the caller's session.
     `nil` is allowed (for tests, admin scripts, or background jobs without a user
@@ -112,65 +112,79 @@ defmodule AgentsDemo.Agents.Factory do
   - `:tool_context` - Optional. Map of caller-supplied data passed to tool functions
     via `LLMChain.custom_context`. Defaults to `%{}`. Example: `%{user_id: 42}`.
 
-  ## Examples
+  ## Returns
 
-      # Standard usage with user scope
-      {:ok, agent} = Factory.create_agent(
-        agent_id: "conv-123",
-        filesystem_scope: {:user, user_id}
-      )
+  Returns `{:ok, agent, session_opts}` where `session_opts` is a keyword
+  list. The library recognizes one key:
 
-      # Project-scoped filesystem
-      {:ok, agent} = Factory.create_agent(
-        agent_id: "conv-123",
-        filesystem_scope: {:project, project_id}
-      )
+  - `:initial_todos` — list of `Sagents.Todo` structs to seed onto fresh
+    state. Ignored when persisted state is restored.
 
-      # Agent-scoped (isolated per conversation)
-      {:ok, agent} = Factory.create_agent(
-        agent_id: "conv-123",
-        filesystem_scope: nil
-      )
-
-      # With timezone and custom HITL
-      {:ok, agent} = Factory.create_agent(
-        agent_id: "conv-123",
-        filesystem_scope: {:user, user_id},
-        timezone: "America/New_York",
-        interrupt_on: %{
-          "write_file" => true,
-          "delete_file" => true,
-          "execute_command" => true
-        }
-      )
+  All other keys are app-internal — `Sagents.Session` plumbs the keyword
+  list through but does not inspect it.
 
   """
   def create_agent(opts \\ []) do
     agent_id = Keyword.fetch!(opts, :agent_id)
-    filesystem_scope = Keyword.fetch!(opts, :filesystem_scope)
     scope = Keyword.get(opts, :scope)
     timezone = Keyword.get(opts, :timezone, "UTC")
     interrupt_on = Keyword.get(opts, :interrupt_on, default_interrupt_on())
     tool_context = Keyword.get(opts, :tool_context, %{})
 
-    Agent.new(
-      %{
-        agent_id: agent_id,
-        model: get_model_config(),
-        base_system_prompt: base_system_prompt(),
-        middleware: build_middleware(filesystem_scope, interrupt_on, timezone, scope),
-        name: "Demo Agent",
-        fallback_models: get_fallback_models(),
-        before_fallback: get_before_fallback(),
-        # Add any custom tools here (tools not provided by middleware)
-        tools: [],
-        tool_context: tool_context,
-        scope: scope
-      },
-      # Since we specify the full middleware stack, don't add defaults
-      replace_default_middleware: true
-    )
+    # The factory owns its own filesystem setup: derive a user-scoped
+    # filesystem from the caller's scope and ensure the FileSystemServer
+    # is running before wiring it into the FileSystem middleware.
+    # `ensure_user_filesystem/1` is idempotent.
+    filesystem_scope = ensure_filesystem_for(scope)
+
+    case Agent.new(
+           %{
+             agent_id: agent_id,
+             model: get_model_config(),
+             base_system_prompt: base_system_prompt(),
+             middleware: build_middleware(filesystem_scope, interrupt_on, timezone, scope),
+             name: "Demo Agent",
+             fallback_models: get_fallback_models(),
+             before_fallback: get_before_fallback(),
+             # Add any custom tools here (tools not provided by middleware)
+             tools: [],
+             tool_context: tool_context,
+             scope: scope
+           },
+           # Since we specify the full middleware stack, don't add defaults
+           replace_default_middleware: true
+         ) do
+      {:ok, agent} -> {:ok, agent, []}
+      {:error, _} = err -> err
+    end
   end
+
+  # ---------------------------------------------------------------------------
+  # Filesystem setup
+  # ---------------------------------------------------------------------------
+
+  # Returns the `filesystem_scope` tuple to wire into the FileSystem
+  # middleware, ensuring the underlying `FileSystemServer` is running for
+  # that scope. With a user scope present, the agent shares one
+  # user-scoped filesystem across all conversations (long-term memory).
+  # Without a user scope (tests, admin scripts) the middleware falls back
+  # to its default `{:agent, agent_id}`.
+  defp ensure_filesystem_for(%{user: %{id: user_id}}) when not is_nil(user_id) do
+    case DemoSetup.ensure_user_filesystem(user_id) do
+      {:ok, scope_key} ->
+        scope_key
+
+      {:error, reason} ->
+        Logger.warning(
+          "Factory could not ensure user filesystem (user_id=#{user_id}): #{inspect(reason)}. " <>
+            "Falling back to agent-scoped filesystem."
+        )
+
+        nil
+    end
+  end
+
+  defp ensure_filesystem_for(_other), do: nil
 
   # ---------------------------------------------------------------------------
   # Model Configuration
@@ -401,7 +415,19 @@ defmodule AgentsDemo.Agents.Factory do
       # Virtual filesystem - file operations with configurable scope
       # For user-facing agents, pass {:user, user_id} from the Coordinator
       # If nil, defaults to {:agent, agent_id} (isolated per conversation)
-      {Sagents.Middleware.FileSystem, [filesystem_scope: filesystem_scope]},
+      {Sagents.Middleware.FileSystem,
+       [
+         enabled_tools: [
+           "list_files",
+           "read_file",
+           "create_file",
+           #  "insert_file_lines",
+           "find_in_file",
+           "move_file",
+           "delete_file"
+         ],
+         filesystem_scope: filesystem_scope
+       ]},
 
       # SubAgent - spawn child agents for complex tasks
       # Configure block_middleware to prevent certain middleware from being
@@ -435,18 +461,17 @@ defmodule AgentsDemo.Agents.Factory do
       # PatchToolCalls - fix dangling tool calls from interrupted conversations
       Sagents.Middleware.PatchToolCalls,
 
-      # AskUserQuestion - structured questions with typed responses Gives the
-      # agent an `ask_user` tool for presenting single-select, multi-select, or
-      # freeform questions to the user via the interrupt/resume lifecycle. The
-      # UI renders appropriate controls based on response_type.
+      # AskUserQuestion - structured questions with typed responses
+      # Gives the agent an `ask_user` tool for presenting single-select,
+      # multi-select, or freeform questions to the user via the interrupt/resume
+      # lifecycle. The UI renders appropriate controls based on response_type.
       Sagents.Middleware.AskUserQuestion
     ]
     # HumanInTheLoop MUST be last. During resume, HITL executes all tools
-    # (including auto-approved ones from other middleware). If those tools
-    # produce interrupts (e.g., ask_user), HITL hands off via {:cont} to the
-    # next middleware in the resume cycle. Middleware that already ran (earlier
-    # in the list) won't get a second chance, so interrupt-producing middleware
-    # must come before HITL.
+    # (including auto-approved ones from other middleware). If those tools produce
+    # interrupts (e.g., ask_user), HITL hands off via {:cont} to the next middleware
+    # in the resume cycle. Middleware that already ran (earlier in the list) won't
+    # get a second chance, so interrupt-producing middleware must come before HITL.
     |> HumanInTheLoop.maybe_append(interrupt_on)
   end
 end

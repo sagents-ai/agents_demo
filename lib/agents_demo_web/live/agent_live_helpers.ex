@@ -2,37 +2,36 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   @moduledoc """
   LiveView shell over `AgentsDemo.Agents.AgentSubscriberSession`.
 
-  Each function takes a `socket`, calls the equivalent host-agnostic function on
-  `AgentSubscriberSession`, and applies the resulting changes via `assign/2`.
-  LiveView-specific concerns — streams (`stream/3`, `stream_insert/3`), flash
-  messages, `connected?` gates, and orchestrating `AgentServer.resume/2` calls
-  with their flash side effects — live here.
+  Each function takes a `socket`, calls the equivalent host-agnostic
+  function on `AgentSubscriberSession`, and applies the resulting
+  changes via `assign/2`. LiveView-specific concerns — streams (`stream/3`,
+  `stream_insert/3`), flash messages, `connected?` gates, and orchestrating
+  `AgentServer.resume/2` calls with their flash side effects — live here.
 
-  Non-LiveView consumers (a GraphQL bridge GenServer, etc.) should bypass this
-  module and call `AgentSubscriberSession` directly.
+  Non-LiveView consumers (a GraphQL bridge GenServer, etc.) should bypass
+  this module and call `AgentSubscriberSession` directly.
 
   ## Subscription model
 
   The host LiveView keeps a `Sagents.Subscriber` subs map in
   `socket.assigns.sagents_subs`. The host is also expected to:
 
-    1. In `mount/3`, subscribe the LiveView process to the agent presence topic
-       via `Phoenix.PubSub.subscribe(AgentsDemoWeb.PubSub,
-       Sagents.Subscriber.presence_topic())` so `presence_diff` broadcasts drive
-       auto-resubscribe on agent migration.
+    1. In `mount/3`, subscribe the LiveView process to the agent presence
+       topic via `Phoenix.PubSub.subscribe(AgentsDemoWeb.PubSub,
+       Sagents.Subscriber.presence_topic())` so `presence_diff` broadcasts
+       drive auto-resubscribe on agent migration.
 
     2. In `handle_info/2`, route `{:DOWN, ref, :process, _, _}` and
        `%Phoenix.Socket.Broadcast{event: "presence_diff"}` to
        `handle_publisher_down/2` and `handle_presence_diff/2` here.
 
     3. For the action path (send_message, wake_agent, etc.), call
-       `Coordinator.ensure_session_running(socket.assigns)` and apply the
-       returned changes with `assign(socket, changes)`.
+       `Coordinator.ensure_session_running(socket.assigns)`
+       and apply the returned changes with `assign(socket, changes)`.
 
   ## Customization
 
-  This module was generated for your application and has hardcoded references
-  to:
+  This module was generated for your application and has hardcoded references to:
   - `AgentsDemo.Conversations` - Database context
   - `AgentsDemo.Agents.Coordinator` - Agent coordination
   - `AgentsDemo.Agents.AgentSubscriberSession` - Host-agnostic state model
@@ -154,17 +153,46 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
         |> assign(:has_messages, has_messages)
 
       socket =
-        if agent_status == :interrupted do
-          info = AgentServer.get_info(agent_id)
-          handle_status_interrupted(socket, info.interrupt_data)
-        else
-          socket
+        cond do
+          agent_status == :interrupted ->
+            info = AgentServer.get_info(agent_id)
+            handle_status_interrupted(socket, info.interrupt_data)
+
+          agent_status == :not_running and Conversations.interrupted?(conversation) ->
+            # Persisted state has a pending interrupt the user needs to see.
+            # Auto-wake the agent so the boot broadcast surfaces the question
+            # UI; clicking "Answer" then resumes against a live process.
+            # Other (idle/historical) conversations stay lazy — opening them
+            # for a read-only browse does not spin up an agent.
+            auto_wake_for_pending_interrupt(socket)
+
+          true ->
+            socket
         end
 
       {:ok, socket}
     rescue
       Ecto.NoResultsError ->
         {:error, put_flash(socket, :error, "Conversation not found")}
+    end
+  end
+
+  # Boots the agent for a conversation whose persisted metadata indicates a
+  # pending interrupt. The LiveView is seeded as initial subscriber inside
+  # ensure_session_running, so the boot broadcast (carrying the restored
+  # `:interrupted` status from sagents' derive_boot_status) reaches us via
+  # handle_info and surfaces the interrupt UI without polling.
+  defp auto_wake_for_pending_interrupt(socket) do
+    case Coordinator.ensure_session_running(socket.assigns) do
+      {:ok, changes} ->
+        assign(socket, changes)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Auto-wake failed for interrupted conversation #{socket.assigns[:conversation_id]}: #{inspect(reason)}"
+        )
+
+        socket
     end
   end
 
@@ -198,9 +226,10 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   # ===========================================================================
 
   @doc """
-  Route a `{:DOWN, ref, :process, _pid, _reason}` from a producer crash to
-  `AgentSubscriberSession.handle_publisher_down/3`. Pending subscriptions flip
-  to `:pending` and we wait for `presence_diff` to drive resubscribe.
+  Route a `{:DOWN, ref, :process, _pid, _reason}` from a producer crash
+  to `AgentSubscriberSession.handle_publisher_down/3`. Pending
+  subscriptions flip to `:pending` and we wait for `presence_diff` to drive
+  resubscribe.
   """
   def handle_publisher_down(socket, ref, reason \\ :noproc) do
     changes = AgentSubscriberSession.handle_publisher_down(socket.assigns, ref, reason)

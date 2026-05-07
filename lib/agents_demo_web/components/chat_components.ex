@@ -1552,7 +1552,7 @@ defmodule AgentsDemoWeb.ChatComponents do
             phx-click="question_cancel"
             class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline transition-colors duration-150"
           >
-            Skip this question
+            Cancel
           </button>
         <% end %>
       </div>
