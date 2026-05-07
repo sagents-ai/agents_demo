@@ -102,7 +102,13 @@ defmodule AgentsDemo.MixProject do
         "esbuild agents_demo --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "credo", "test"]
+      precommit: [
+        "compile --warning-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "credo",
+        "test"
+      ]
     ]
   end
 end
