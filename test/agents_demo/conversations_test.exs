@@ -440,6 +440,89 @@ defmodule AgentsDemo.ConversationsTest do
 
       assert [] = Conversations.load_display_messages(owner_scope, conversation.id)
     end
+
+    test "accepts a valid todo_snapshot content type" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+
+      content = %{
+        "todos" => [
+          %{"id" => "1", "content" => "Plan", "status" => "completed"},
+          %{"id" => "2", "content" => "Execute", "status" => "in_progress"},
+          %{"id" => "3", "content" => "Verify", "status" => "pending"}
+        ],
+        "summary" => %{
+          "total" => 3,
+          "pending" => 1,
+          "in_progress" => 1,
+          "completed" => 1
+        }
+      }
+
+      assert {:ok, %DisplayMessage{} = message} =
+               Conversations.append_display_message(scope, conversation.id, %{
+                 message_type: "system",
+                 content_type: "todo_snapshot",
+                 content: content
+               })
+
+      assert message.content_type == "todo_snapshot"
+      assert message.content["todos"] == content["todos"]
+      assert DisplayMessage.to_text(message) =~ "1 pending"
+      assert DisplayMessage.to_text(message) =~ "1 completed"
+    end
+
+    test "accepts a todo_snapshot with an empty todo list (auto-clear case)" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+
+      assert {:ok, %DisplayMessage{}} =
+               Conversations.append_display_message(scope, conversation.id, %{
+                 message_type: "system",
+                 content_type: "todo_snapshot",
+                 content: %{
+                   "todos" => [],
+                   "summary" => %{
+                     "total" => 0,
+                     "pending" => 0,
+                     "in_progress" => 0,
+                     "completed" => 0
+                   }
+                 }
+               })
+    end
+
+    test "rejects a todo_snapshot missing the todos list" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+
+      assert {:error, changeset} =
+               Conversations.append_display_message(scope, conversation.id, %{
+                 message_type: "system",
+                 content_type: "todo_snapshot",
+                 content: %{"summary" => %{"total" => 0}}
+               })
+
+      assert "invalid structure for content_type todo_snapshot" in errors_on(changeset).content
+    end
+
+    test "rejects a todo_snapshot with an invalid status value" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+
+      assert {:error, changeset} =
+               Conversations.append_display_message(scope, conversation.id, %{
+                 message_type: "system",
+                 content_type: "todo_snapshot",
+                 content: %{
+                   "todos" => [
+                     %{"id" => "1", "content" => "Bad", "status" => "not_a_status"}
+                   ]
+                 }
+               })
+
+      assert "todo_snapshot has invalid todo entries" in errors_on(changeset).content
+    end
   end
 
   describe "load_display_messages/3" do

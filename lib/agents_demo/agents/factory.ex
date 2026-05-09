@@ -241,7 +241,8 @@ defmodule AgentsDemo.Agents.Factory do
     interrupt_on = default_interrupt_on(c)
 
     [
-      Sagents.Middleware.TodoList,
+      # Include display of the TODO list as inline in the chat
+      {Sagents.Middleware.TodoList, [inline: true]},
       {ConversationTitle,
        [
          chat_model: get_title_model(c),

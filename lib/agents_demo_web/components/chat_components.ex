@@ -615,6 +615,8 @@ defmodule AgentsDemoWeb.ChatComponents do
         <div class="px-4 py-1 text-sm italic text-[var(--color-text-secondary)]">
           {get_in(@message.content, ["text"])}
         </div>
+      <% "todo_snapshot" -> %>
+        <.todo_snapshot_display message={@message} />
       <% _other -> %>
         <.text_message
           message={@message}
@@ -687,6 +689,102 @@ defmodule AgentsDemoWeb.ChatComponents do
         <% end %>
       </div>
     </div>
+    """
+  end
+
+  attr :message, :map, required: true
+
+  # Component: Todo Snapshot (inline TodoList middleware snapshot card)
+  #
+  # Renders a card listing the todos in a frozen-in-time snapshot. Each row
+  # has a checkbox-style indicator (rounded square with optional inner glyph)
+  # rather than an animated icon — the snapshot is historical and shouldn't
+  # imply live activity. The four states all occupy the same visual footprint
+  # so rows align cleanly:
+  #
+  #   pending     ☐  outlined empty box (muted, holds the slot)
+  #   in_progress ▣  outlined accent box with a small filled inner square
+  #   completed   ✓  filled accent box with a white check
+  #   cancelled   ✕  outlined box with a small × glyph (dimmed, struck)
+  #
+  # Emitted by Sagents.Middleware.TodoList when configured with `inline: true`.
+  defp todo_snapshot_display(assigns) do
+    todos = get_in(assigns.message.content, ["todos"]) || []
+    summary = get_in(assigns.message.content, ["summary"]) || %{}
+
+    assigns =
+      assigns
+      |> assign(:todos, todos)
+      |> assign(:summary, summary)
+
+    ~H"""
+    <div class="ml-1 pl-3 pr-4 py-2 border-l-4 rounded bg-[var(--color-surface)] border-[var(--color-border)]">
+      <div class="flex items-center gap-2 mb-2">
+        <.icon name="hero-clipboard-document-list" class="w-4 h-4 text-[var(--color-text-secondary)]" />
+        <span class="text-sm font-medium text-[var(--color-text-primary)]">Todo list</span>
+        <span :if={@summary != %{}} class="ml-auto text-xs text-[var(--color-text-tertiary)]">
+          {Map.get(@summary, "completed", 0)}/{Map.get(@summary, "total", 0)}
+        </span>
+      </div>
+
+      <ul :if={@todos != []} class="space-y-1 text-sm">
+        <li
+          :for={todo <- @todos}
+          class={[
+            "flex items-start gap-2",
+            todo["status"] == "completed" && "line-through text-[var(--color-text-tertiary)]",
+            todo["status"] == "in_progress" &&
+              "text-[var(--color-text-primary)] font-medium",
+            todo["status"] == "pending" && "text-[var(--color-text-secondary)]",
+            todo["status"] == "cancelled" && "line-through text-[var(--color-text-tertiary)]"
+          ]}
+        >
+          <.todo_status_box status={todo["status"]} />
+          <span>{todo["content"]}</span>
+        </li>
+      </ul>
+
+      <p :if={@todos == []} class="text-xs italic text-[var(--color-text-secondary)]">
+        All tasks completed.
+      </p>
+    </div>
+    """
+  end
+
+  attr :status, :string, required: true
+
+  # Status indicator: a fixed-size rounded box so every row aligns regardless
+  # of state. Pure CSS shapes plus a small heroicon glyph for completed and
+  # cancelled; in_progress uses a nested inner square (no icon) for a stable,
+  # non-animated "active marker" look that still reads as historical.
+  defp todo_status_box(%{status: "completed"} = assigns) do
+    ~H"""
+    <span class="w-4 h-4 mt-0.5 shrink-0 rounded flex items-center justify-center bg-[var(--color-success)]">
+      <.icon name="hero-check" class="w-3 h-3 text-white" />
+    </span>
+    """
+  end
+
+  defp todo_status_box(%{status: "in_progress"} = assigns) do
+    ~H"""
+    <span class="w-4 h-4 mt-0.5 shrink-0 rounded border-2 border-[var(--color-warning)] flex items-center justify-center">
+      <span class="w-1.5 h-1.5 rounded-sm bg-[var(--color-warning)]"></span>
+    </span>
+    """
+  end
+
+  defp todo_status_box(%{status: "cancelled"} = assigns) do
+    ~H"""
+    <span class="w-4 h-4 mt-0.5 shrink-0 rounded flex items-center justify-center bg-[var(--color-error)]">
+      <.icon name="hero-x-mark" class="w-3 h-3 text-white" />
+    </span>
+    """
+  end
+
+  defp todo_status_box(assigns) do
+    ~H"""
+    <span class="w-4 h-4 mt-0.5 shrink-0 rounded border-2 border-[var(--color-text-tertiary)] bg-[var(--color-background)]">
+    </span>
     """
   end
 
