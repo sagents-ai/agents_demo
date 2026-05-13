@@ -432,8 +432,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert ToolCall.execution_status(tc) == "executing"
     end
 
-    test "clears streaming delta on completed" do
-      delta = %MessageDelta{role: :assistant, status: :incomplete}
+    test "clears streaming delta when the last tool call terminates (completed)" do
+      tool_call = %ToolCall{
+        call_id: "call-123",
+        name: "file_write",
+        metadata: %{"execution_status" => "executing"}
+      }
+
+      delta = %MessageDelta{role: :assistant, status: :incomplete, tool_calls: [tool_call]}
       socket = new_socket(%{streaming_delta: delta})
 
       tool_info = %{call_id: "call-123", name: "file_write", result: "success"}
@@ -442,14 +448,47 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.streaming_delta == nil
     end
 
-    test "clears streaming delta on failed" do
-      delta = %MessageDelta{role: :assistant, status: :incomplete}
+    test "clears streaming delta when the last tool call terminates (failed)" do
+      tool_call = %ToolCall{
+        call_id: "call-123",
+        name: "file_write",
+        metadata: %{"execution_status" => "executing"}
+      }
+
+      delta = %MessageDelta{role: :assistant, status: :incomplete, tool_calls: [tool_call]}
       socket = new_socket(%{streaming_delta: delta})
 
       tool_info = %{call_id: "call-123", name: "file_write", error: "something went wrong"}
 
       result = AgentLiveHelpers.handle_tool_execution_update(socket, :failed, tool_info)
       assert result.assigns.streaming_delta == nil
+    end
+
+    test "keeps streaming delta when a sibling tool call is still in flight" do
+      done = %ToolCall{
+        call_id: "call-a",
+        name: "search",
+        metadata: %{"execution_status" => "executing"}
+      }
+
+      running = %ToolCall{
+        call_id: "call-b",
+        name: "read_file",
+        metadata: %{"execution_status" => "executing"}
+      }
+
+      delta = %MessageDelta{role: :assistant, status: :incomplete, tool_calls: [done, running]}
+      socket = new_socket(%{streaming_delta: delta})
+
+      result =
+        AgentLiveHelpers.handle_tool_execution_update(socket, :completed, %{
+          call_id: "call-a",
+          name: "search"
+        })
+
+      assert %MessageDelta{tool_calls: [a, b]} = result.assigns.streaming_delta
+      assert a.metadata["execution_status"] == "completed"
+      assert b.metadata["execution_status"] == "executing"
     end
 
     test "handles nil streaming delta gracefully" do
