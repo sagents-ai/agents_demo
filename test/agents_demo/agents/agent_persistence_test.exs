@@ -28,7 +28,7 @@ defmodule AgentsDemo.Agents.AgentPersistenceTest do
     test "does not touch the interrupt flag" do
       scope = user_scope_fixture()
       conversation = conversation_fixture(%{scope: scope})
-      {:ok, _} = Conversations.set_interrupt_status(scope, conversation.id, true)
+      {:ok, _conversation} = Conversations.set_interrupt_status(scope, conversation.id, true)
 
       context = %{
         agent_id: "conversation-#{conversation.id}",
@@ -50,7 +50,7 @@ defmodule AgentsDemo.Agents.AgentPersistenceTest do
       agent_id = "conversation-#{conversation.id}"
       state_data = %{"version" => 1, "messages" => []}
 
-      {:ok, _} = Conversations.delete_conversation(scope, conversation.id)
+      {:ok, _deleted} = Conversations.delete_conversation(scope, conversation.id)
 
       context = %{
         agent_id: agent_id,
@@ -101,7 +101,7 @@ defmodule AgentsDemo.Agents.AgentPersistenceTest do
       conversation: conversation,
       context: context
     } do
-      {:ok, _} = Conversations.set_interrupt_status(scope, conversation.id, true)
+      {:ok, _conversation} = Conversations.set_interrupt_status(scope, conversation.id, true)
 
       assert :ok = AgentPersistence.set_interrupted(scope, context, false)
 
@@ -114,7 +114,7 @@ defmodule AgentsDemo.Agents.AgentPersistenceTest do
       conversation: conversation,
       context: context
     } do
-      {:ok, _} = Conversations.delete_conversation(scope, conversation.id)
+      {:ok, _deleted} = Conversations.delete_conversation(scope, conversation.id)
 
       log =
         capture_log(fn ->

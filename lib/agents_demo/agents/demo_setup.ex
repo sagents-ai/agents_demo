@@ -135,8 +135,8 @@ defmodule AgentsDemo.Agents.DemoSetup do
   defp empty_directory?(path) do
     case File.ls(path) do
       {:ok, []} -> true
-      {:ok, _} -> false
-      {:error, _} -> true
+      {:ok, _entries} -> false
+      {:error, _reason} -> true
     end
   end
 

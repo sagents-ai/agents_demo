@@ -385,7 +385,7 @@ defmodule AgentsDemo.Agents.AgentSubscriberSession do
       {:ok, _ref} ->
         :ok
 
-      {:error, {:already_tracked, _, _, _}} ->
+      {:error, {:already_tracked, _topic, _key, _meta}} ->
         :ok
 
       {:error, reason} ->

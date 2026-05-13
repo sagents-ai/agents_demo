@@ -236,5 +236,5 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
     "Todo list (#{length(todos)} items)"
   end
 
-  def to_text(_), do: ""
+  def to_text(_message), do: ""
 end

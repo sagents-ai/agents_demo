@@ -620,15 +620,15 @@ defmodule AgentsDemo.Middleware.WebToolMiddlewareTest do
       # Test empty query
       context = %{agent_id: "test", state: %{}}
       result = tool.function.(%{"query" => ""}, context)
-      assert {:error, _} = result
+      assert {:error, _reason} = result
 
       # Test whitespace-only query
       result = tool.function.(%{"query" => "   "}, context)
-      assert {:error, _} = result
+      assert {:error, _reason} = result
 
       # Test nil query
       result = tool.function.(%{}, context)
-      assert {:error, _} = result
+      assert {:error, _reason} = result
     end
   end
 

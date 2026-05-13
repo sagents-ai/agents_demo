@@ -126,7 +126,7 @@ defmodule AgentsDemo.Accounts.User do
     Bcrypt.verify_pass(password, hashed_password)
   end
 
-  def valid_password?(_, _) do
+  def valid_password?(_user, _password) do
     Bcrypt.no_user_verify()
     false
   end
