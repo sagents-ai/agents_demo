@@ -65,10 +65,10 @@ defmodule AgentsDemo.Middleware.InjectCurrentTime do
 
   defp valid_timezone?(timezone) when is_binary(timezone) do
     case DateTime.now(timezone) do
-      {:ok, _} -> true
-      {:error, _} -> false
+      {:ok, _dt} -> true
+      {:error, _reason} -> false
     end
   end
 
-  defp valid_timezone?(_), do: false
+  defp valid_timezone?(_other), do: false
 end

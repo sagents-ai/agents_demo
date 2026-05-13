@@ -541,7 +541,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{agent_id: "agent-123", conversation: conversation})
 
       Conversations
-      |> stub(:update_conversation, fn _, _other -> raise "Should not be called" end)
+      |> stub(:update_conversation, fn _scope, _other -> raise "Should not be called" end)
 
       result =
         AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "other-agent")
@@ -553,7 +553,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{agent_id: "agent-123"})
 
       Conversations
-      |> stub(:update_conversation, fn _, _other -> raise "Should not be called" end)
+      |> stub(:update_conversation, fn _scope, _other -> raise "Should not be called" end)
 
       result =
         AgentLiveHelpers.handle_conversation_title_generated(socket, "New Title", "agent-123")
@@ -661,7 +661,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket()
 
       Conversations
-      |> stub(:load_display_messages, fn _, _other -> raise "Should not be called" end)
+      |> stub(:load_display_messages, fn _scope, _other -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reload_messages_from_db(socket)
       assert result == socket
@@ -671,7 +671,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{conversation_id: 123})
 
       Conversations
-      |> stub(:load_display_messages, fn _, _other -> raise "Should not be called" end)
+      |> stub(:load_display_messages, fn _scope, _other -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reload_messages_from_db(socket)
       assert result == socket
@@ -714,7 +714,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{conversation_id: 123, current_scope: scope})
 
       Conversations
-      |> stub(:append_text_message, fn _, _, _, _other -> {:error, :database_error} end)
+      |> stub(:append_text_message, fn _conv_id, _role, _text, _other ->
+        {:error, :database_error}
+      end)
 
       message = AgentLiveHelpers.create_or_persist_message(socket, :assistant, "Fallback")
 
@@ -838,7 +840,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket(%{conversation_id: "conv-123", agent_id: "agent-123"})
 
       Sagents.Subscriber
-      |> stub(:unsubscribe_from_agent, fn _, _other -> raise "Should not be called" end)
+      |> stub(:unsubscribe_from_agent, fn _scope, _other -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reset_conversation(socket)
 
@@ -849,7 +851,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       socket = new_socket([], [], connected: true)
 
       Sagents.Subscriber
-      |> stub(:unsubscribe_from_agent, fn _, _other -> raise "Should not be called" end)
+      |> stub(:unsubscribe_from_agent, fn _scope, _other -> raise "Should not be called" end)
 
       result = AgentLiveHelpers.reset_conversation(socket)
 
@@ -871,12 +873,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       Conversations
       |> stub(:get_conversation!, fn _scope, _id -> conversation end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
-      |> stub(:track_conversation_viewer, fn _, _other -> {:ok, :ref} end)
+      |> stub(:track_conversation_viewer, fn _scope, _other -> {:ok, :ref} end)
 
       Sagents.Subscriber
       |> stub(:subscribe_to_agent, fn subs, _agent_id -> subs end)
@@ -901,7 +903,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other ->
+      |> stub(:get_conversation!, fn _scope, _other ->
         raise Ecto.NoResultsError, queryable: "conversations"
       end)
 
@@ -922,7 +924,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       todos = [%{content: "Todo 1", status: :pending}]
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> conversation end)
+      |> stub(:get_conversation!, fn _scope, _other -> conversation end)
       |> expect(:load_display_messages, fn _scope, conv_id ->
         assert conv_id == 123
         display_messages
@@ -950,9 +952,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
@@ -975,9 +977,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       sample_subs = %{
         {:agent, "agent-123"} => %{
@@ -1021,16 +1023,16 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
-      |> stub(:track_conversation_viewer, fn _, _other -> raise "Should not be called" end)
+      |> stub(:track_conversation_viewer, fn _scope, _other -> raise "Should not be called" end)
 
       Sagents.Subscriber
-      |> stub(:subscribe_to_agent, fn _, _other ->
+      |> stub(:subscribe_to_agent, fn _scope, _other ->
         raise "Should not be called when disconnected"
       end)
 
@@ -1066,9 +1068,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> %{id: 123, title: "New"} end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "New"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       Sagents.Subscriber
       |> expect(:unsubscribe_from_agent, fn _subs, agent_id ->
@@ -1079,7 +1081,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
-      |> stub(:track_conversation_viewer, fn _, _other -> {:ok, :ref} end)
+      |> stub(:track_conversation_viewer, fn _scope, _other -> {:ok, :ref} end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _other -> :not_running end)
@@ -1098,17 +1100,17 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> %{id: 123, title: "Same"} end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "Same"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       Sagents.Subscriber
-      |> stub(:unsubscribe_from_agent, fn _, _other -> raise "Should not be called" end)
+      |> stub(:unsubscribe_from_agent, fn _scope, _other -> raise "Should not be called" end)
       |> stub(:subscribe_to_agent, fn subs, _other -> subs end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
-      |> stub(:track_conversation_viewer, fn _, _other -> {:ok, :ref} end)
+      |> stub(:track_conversation_viewer, fn _scope, _other -> {:ok, :ref} end)
 
       Sagents.AgentServer
       |> stub(:get_status, fn _other -> :not_running end)
@@ -1125,13 +1127,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       scope = {:user, 1}
 
       Conversations
-      |> stub(:get_conversation!, fn _, _other -> %{id: 123, title: "Test"} end)
-      |> stub(:load_display_messages, fn _, _other -> [] end)
-      |> stub(:load_todos, fn _, _other -> [] end)
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
-      |> stub(:track_conversation_viewer, fn _, _other ->
+      |> stub(:track_conversation_viewer, fn _scope, _other ->
         {:error, {:already_tracked, :ref, :meta, :data}}
       end)
 

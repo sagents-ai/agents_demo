@@ -198,12 +198,12 @@ defmodule AgentsDemo.Conversations do
         |> Enum.map(fn todo_map ->
           case Todo.from_map(todo_map) do
             {:ok, todo} -> todo
-            {:error, _} -> nil
+            {:error, _reason} -> nil
           end
         end)
         |> Enum.reject(&is_nil/1)
 
-      {:ok, _} ->
+      {:ok, _other} ->
         []
 
       {:error, :not_found} ->

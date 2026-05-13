@@ -248,7 +248,7 @@ defmodule AgentsDemoWeb.UserAuth do
 
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      {user, _} =
+      {user, _token_inserted_at} =
         if user_token = session["user_token"] do
           Accounts.get_user_by_session_token(user_token)
         end || {nil, nil}
@@ -263,7 +263,7 @@ defmodule AgentsDemoWeb.UserAuth do
     ~p"/users/settings"
   end
 
-  def signed_in_path(_), do: ~p"/chat"
+  def signed_in_path(_conn), do: ~p"/chat"
 
   @doc """
   Plug for routes that require the user to be authenticated.

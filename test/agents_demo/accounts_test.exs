@@ -241,9 +241,9 @@ defmodule AgentsDemo.AccountsTest do
     end
 
     test "deletes all tokens for the given user", %{user: user} do
-      _ = Accounts.generate_user_session_token(user)
+      _token = Accounts.generate_user_session_token(user)
 
-      {:ok, {_, _}} =
+      {:ok, {_user, _expired_tokens}} =
         Accounts.update_user_password(user, %{
           password: "new valid password"
         })

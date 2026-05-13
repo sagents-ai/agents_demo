@@ -375,32 +375,31 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       expect(ChatAnthropic, :call, 2, fn _model, messages, _tools ->
         last_message = List.last(messages)
 
-        cond do
-          # Update tool call
+        update_tool_call? =
           match?(%Message{role: :user}, last_message) and
-              Enum.any?(messages, fn msg ->
-                match?(%Message{role: :user}, msg) and
-                    Enum.any?(msg.content, fn part ->
-                      String.contains?(part.content, "Mark first task complete")
-                    end)
-              end) ->
-            tool_call =
-              ToolCall.new!(%{
-                call_id: "call_update",
-                name: "write_todos",
-                arguments: %{
-                  "merge" => true,
-                  "todos" => [
-                    %{"content" => "Initial Task 1", "id" => "1", "status" => "completed"}
-                  ]
-                }
-              })
+            Enum.any?(messages, fn msg ->
+              match?(%Message{role: :user}, msg) and
+                Enum.any?(msg.content, fn part ->
+                  String.contains?(part.content, "Mark first task complete")
+                end)
+            end)
 
-            {:ok, [Message.new_assistant!(%{content: "Updating", tool_calls: [tool_call]})]}
+        if update_tool_call? do
+          tool_call =
+            ToolCall.new!(%{
+              call_id: "call_update",
+              name: "write_todos",
+              arguments: %{
+                "merge" => true,
+                "todos" => [
+                  %{"content" => "Initial Task 1", "id" => "1", "status" => "completed"}
+                ]
+              }
+            })
 
-          # Final response
-          true ->
-            {:ok, [Message.new_assistant!("Task updated!")]}
+          {:ok, [Message.new_assistant!(%{content: "Updating", tool_calls: [tool_call]})]}
+        else
+          {:ok, [Message.new_assistant!("Task updated!")]}
         end
       end)
 

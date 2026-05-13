@@ -166,7 +166,7 @@ defmodule AgentsDemo.ConversationsTest do
       conversation = conversation_fixture(%{scope: scope})
       agent_state_fixture(scope, conversation.id)
 
-      assert {:ok, _} = Conversations.delete_conversation(conversation)
+      assert {:ok, _deleted} = Conversations.delete_conversation(conversation)
 
       # Agent state should be deleted due to on_delete: :delete_all
       assert {:error, :not_found} = Conversations.load_agent_state(scope, conversation.id)
@@ -178,7 +178,7 @@ defmodule AgentsDemo.ConversationsTest do
       text_message_fixture(scope, conversation.id, %{text: "Message 1"})
       text_message_fixture(scope, conversation.id, %{text: "Message 2"})
 
-      assert {:ok, _} = Conversations.delete_conversation(conversation)
+      assert {:ok, _deleted} = Conversations.delete_conversation(conversation)
 
       # `load_display_messages` returns [] when conversation is missing in scope.
       assert [] = Conversations.load_display_messages(scope, conversation.id)
@@ -225,7 +225,7 @@ defmodule AgentsDemo.ConversationsTest do
       conversation = conversation_fixture(%{scope: scope})
       state_data = %{"version" => 1, "data" => "test"}
 
-      {:ok, _} = Conversations.save_agent_state(scope, conversation.id, state_data)
+      {:ok, _saved} = Conversations.save_agent_state(scope, conversation.id, state_data)
 
       assert {:ok, loaded_state} = Conversations.load_agent_state(scope, conversation.id)
       assert loaded_state == state_data
@@ -256,7 +256,7 @@ defmodule AgentsDemo.ConversationsTest do
       owner_scope = user_scope_fixture()
       other_scope = user_scope_fixture()
       conversation = conversation_fixture(%{scope: owner_scope})
-      {:ok, _} = Conversations.save_agent_state(owner_scope, conversation.id, %{"v" => 1})
+      {:ok, _saved} = Conversations.save_agent_state(owner_scope, conversation.id, %{"v" => 1})
 
       assert {:error, :not_found} = Conversations.load_agent_state(other_scope, conversation.id)
     end
@@ -373,7 +373,7 @@ defmodule AgentsDemo.ConversationsTest do
       conversation = conversation_fixture(%{scope: scope})
 
       # Valid text content
-      assert {:ok, _} =
+      assert {:ok, _message} =
                Conversations.append_display_message(scope, conversation.id, %{
                  message_type: "user",
                  content_type: "text",

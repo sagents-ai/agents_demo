@@ -417,10 +417,10 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
         # Error response from subagent
         {:error, "Web lookup error: #{info}"}
 
-      {:ok, _} ->
+      {:ok, _other} ->
         {:error, "Invalid response format: missing or invalid 'status' field"}
 
-      {:error, _} ->
+      {:error, _decode_error} ->
         {:error, "Sub-agent returned invalid JSON: #{String.slice(result_text, 0..100)}..."}
     end
   end
@@ -458,7 +458,7 @@ defmodule AgentsDemo.Middleware.WebToolMiddleware do
   end
 
   @doc false
-  def validate_success_fields(_) do
+  def validate_success_fields(_other) do
     {:error, "Missing required fields: source_title, source_url, information"}
   end
 

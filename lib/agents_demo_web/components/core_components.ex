@@ -414,7 +414,7 @@ defmodule AgentsDemoWeb.CoreComponents do
   attr :class, :string, default: "size-4"
   attr :rest, :global
 
-  def icon(%{name: "hero-" <> _} = assigns) do
+  def icon(%{name: "hero-" <> _rest} = assigns) do
     ~H"""
     <span class={[@name, @class]} {@rest} />
     """
