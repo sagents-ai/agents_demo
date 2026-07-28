@@ -527,59 +527,92 @@ defmodule AgentsDemoWeb.ChatComponents do
           phx-change="update_input"
           phx-debounce="300"
           placeholder={
-            if @agent_status == :interrupted,
-              do: "Approve or reject pending tools first...",
-              else: "Type your message..."
+            case @agent_status do
+              :interrupted -> "Approve or reject pending tools first..."
+              :running -> "Type your message (it will be sent when the agent finishes)..."
+              _other -> "Type your message..."
+            end
           }
           class="flex-1 px-5 py-3.5 border-2 border-[var(--color-border)] rounded-xl bg-white dark:bg-[var(--color-surface)] text-[var(--color-text-primary)] text-base outline-none focus:border-[var(--color-user-message)] focus:ring-4 focus:ring-[var(--color-user-message)]/10 hover:border-[var(--color-text-tertiary)] transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
           autocomplete="off"
-          disabled={@agent_status in [:running, :interrupted]}
+          disabled={@agent_status == :interrupted}
         />
+        <%!-- Two independent controls while the agent works. Stop and send are
+             different intentions, and "I typed a correction AND I want to stop
+             it now" is exactly when you need both at once. --%>
+        <.chat_stop_button :if={@agent_status == :running} />
         <.chat_submit_button agent_status={@agent_status} input={@input} />
       </form>
     </div>
     """
   end
 
+  # Component: Stop the running agent.
+  #
+  # Rendered only while the agent is running, alongside (not instead of) the
+  # send button. `type="button"` is load-bearing: inside a form, the default
+  # button type is "submit", which would fire send_message as well as cancel.
+  defp chat_stop_button(assigns) do
+    ~H"""
+    <button
+      id="chat-stop-button"
+      type="button"
+      phx-click="cancel_agent"
+      title="Stop the agent"
+      aria-label="Stop the agent"
+      class="px-5 py-3.5 text-white border-none rounded-xl flex items-center justify-center min-w-[56px] shadow-md bg-red-600 hover:bg-red-700 hover:shadow-lg transition-all"
+    >
+      <.icon name="hero-stop" class="w-5 h-5" />
+    </button>
+    """
+  end
+
   attr :agent_status, :atom, default: nil
   attr :input, :string, default: ""
 
+  # Component: Send the typed message.
+  #
+  # Always a submit button. While the agent is running this stays enabled: the
+  # message is queued by AgentServer and delivered when the current run
+  # finishes, so there is nothing to guard against. Only a pending interrupt
+  # blocks it, because the user has to approve or reject those tools first.
   defp chat_submit_button(assigns) do
-    {type, icon, classes, disabled} =
+    {classes, disabled} =
       case assigns.agent_status do
-        :running ->
-          {"button", "hero-stop", "bg-red-600 hover:bg-red-700 hover:shadow-lg transition-all",
-           false}
-
         :interrupted ->
-          {"submit", "hero-paper-airplane",
-           "bg-[var(--color-user-message)] opacity-50 cursor-not-allowed", true}
+          {"bg-[var(--color-user-message)] opacity-50 cursor-not-allowed", true}
 
         _other ->
-          {"submit", "hero-paper-airplane",
-           "bg-[var(--color-user-message)] hover:opacity-90 hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
+          {"bg-[var(--color-user-message)] hover:opacity-90 hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed",
            assigns.input == ""}
+      end
+
+    title =
+      case assigns.agent_status do
+        :interrupted -> "Approve or reject the pending tools first"
+        :running -> "Send when the agent finishes"
+        _other -> "Send message"
       end
 
     assigns =
       assigns
-      |> assign(:button_type, type)
-      |> assign(:icon, icon)
       |> assign(:classes, classes)
       |> assign(:disabled, disabled)
+      |> assign(:title, title)
 
     ~H"""
     <button
-      type={@button_type}
-      phx-click={if @agent_status == :running, do: "cancel_agent"}
-      title={if @agent_status == :running, do: "Stop agent"}
+      id="chat-send-button"
+      type="submit"
+      title={@title}
+      aria-label={@title}
       class={[
         "px-5 py-3.5 text-white border-none rounded-xl flex items-center justify-center min-w-[56px] shadow-md",
         @classes
       ]}
       disabled={@disabled}
     >
-      <.icon name={@icon} class="w-5 h-5" />
+      <.icon name="hero-paper-airplane" class="w-5 h-5" />
     </button>
     """
   end

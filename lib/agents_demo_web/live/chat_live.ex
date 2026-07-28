@@ -127,7 +127,11 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("send_message", %{"message" => message_text}, socket) do
     message_text = String.trim(message_text)
 
-    if message_text == "" or socket.assigns.loading do
+    # Note we no longer block on `loading`. A message sent while the agent is
+    # working is queued by AgentServer and delivered when the current run
+    # finishes, so the input can stay live. Interrupts still block: the user
+    # must approve or reject the pending tools first.
+    if message_text == "" or socket.assigns[:agent_status] == :interrupted do
       {:noreply, socket}
     else
       # Create conversation if this is the first message
