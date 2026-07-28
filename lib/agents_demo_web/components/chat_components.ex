@@ -646,6 +646,8 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :message_id, :any, required: true
   attr :content_text, :string
   attr :class, :string, default: nil
+  # Only `true` for the in-flight thinking buffer. See `markdown/1`.
+  attr :streaming, :boolean, default: false
 
   # Component: Thinking Message (subdued, collapsible display)
   defp thinking_display(assigns) do
@@ -683,6 +685,7 @@ defmodule AgentsDemoWeb.ChatComponents do
               <.markdown
                 text={@content_text}
                 class="prose-sm text-xs text-[var(--color-text-secondary)]"
+                streaming={@streaming}
               />
             </div>
           </div>
@@ -1134,12 +1137,13 @@ defmodule AgentsDemoWeb.ChatComponents do
         :if={@thinking}
         message_id="streaming_delta"
         content_text={@thinking}
+        streaming={true}
       />
 
       <%!-- Text content as its own block, matching saved text_message layout --%>
       <%= if @content != "" do %>
         <div class="px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-          <.markdown text={@content} />
+          <.markdown text={@content} streaming={true} />
           <span
             :if={@tool_calls == []}
             class="ml-1 inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"
@@ -1681,9 +1685,9 @@ defmodule AgentsDemoWeb.ChatComponents do
   defp format_arg_value(nil), do: ""
   defp format_arg_value(value), do: inspect(value)
 
-  defp mdex_config(md_content) do
+  defp mdex_config(md_content, streaming?) do
     [
-      streaming: true,
+      streaming: streaming?,
       markdown: md_content,
       extension: [
         strikethrough: true,
@@ -1706,14 +1710,19 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   @doc """
   Render the raw content as markdown. Returns HTML rendered text.
-  """
-  def render_markdown(nil), do: Phoenix.HTML.raw(nil)
 
-  def render_markdown(text) when is_binary(text) do
+  Pass `true` for `streaming?` **only** when the text is an in-flight streaming
+  delta. See `markdown/1` for why.
+  """
+  def render_markdown(text, streaming? \\ false)
+
+  def render_markdown(nil, _streaming?), do: Phoenix.HTML.raw(nil)
+
+  def render_markdown(text, streaming?) when is_binary(text) do
     # NOTE: This allows explicit HTML to come through.
     #   - Don't allow this with user input.
     text
-    |> mdex_config()
+    |> mdex_config(streaming?)
     |> MDEx.new()
     |> MDEx.to_html!()
     |> Phoenix.HTML.raw()
@@ -1732,10 +1741,17 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   @doc """
   Render a markdown containing web component.
+
+  Set `streaming` to `true` **only** when rendering an in-flight streaming delta
+  whose buffer may be truncated mid-token. Streaming mode optimistically treats a
+  trailing unclosed delimiter (e.g. a lone `~`) as the start of a construct whose
+  closer "hasn't arrived yet" - correct for a live delta, but wrong for a
+  fully-received message, where it would spuriously strike through trailing text.
   """
   attr :text, :string, required: true
   attr :class, :string, default: nil
   attr :invert, :boolean, default: false
+  attr :streaming, :boolean, default: false
   attr :rest, :global
 
   def markdown(%{text: nil} = assigns), do: ~H""
@@ -1752,7 +1768,7 @@ defmodule AgentsDemoWeb.ChatComponents do
         ]}
         {@rest}
       >
-        {render_markdown(@text)}
+        {render_markdown(@text, @streaming)}
       </div>
     </div>
     """

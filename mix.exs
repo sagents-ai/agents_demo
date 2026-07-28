@@ -75,7 +75,7 @@ defmodule AgentsDemo.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:horde, "~> 0.10.0"},
       {:bandit, "~> 1.5"},
-      {:mdex, "~> 0.11"},
+      {:mdex, "~> 0.13"},
       {:lumis, "~> 0.1"},
       {:tidewave, "~> 0.5", only: :dev},
       {:dotenvy, "~> 1.1.0"},
