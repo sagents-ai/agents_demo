@@ -127,10 +127,10 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("send_message", %{"message" => message_text}, socket) do
     message_text = String.trim(message_text)
 
-    # Note we no longer block on `loading`. A message sent while the agent is
-    # working is queued by AgentServer and delivered when the current run
-    # finishes, so the input can stay live. Interrupts still block: the user
-    # must approve or reject the pending tools first.
+    # A message sent while the agent is working is queued by AgentServer and
+    # delivered when the current run finishes, so `loading` does not block
+    # sending and the input stays live. Interrupts do block: the user must
+    # approve or reject the pending tools first.
     if message_text == "" or socket.assigns[:agent_status] == :interrupted do
       {:noreply, socket}
     else
@@ -672,11 +672,15 @@ defmodule AgentsDemoWeb.ChatLive do
   # and returns changed. `Phoenix.Component.assign/2` accepts a map and
   # threads each key through `__changed__` for proper re-render diffing.
   defp ensure_agent_session_running(socket) do
-    request_opts = [timezone: socket.assigns.timezone]
-
-    case Coordinator.ensure_agent_session_running(socket.assigns, request_opts) do
+    case Coordinator.ensure_agent_session_running(
+           socket.assigns,
+           AgentLiveHelpers.agent_request_opts(socket)
+         ) do
       {:ok, %{agent_id: agent_id} = changed} ->
-        {:ok, assign(socket, changed), agent_id}
+        # Mark liveness here rather than waiting for the boot broadcast, so the
+        # Wake button disappears on the click that caused the wake instead of a
+        # round trip later.
+        {:ok, socket |> assign(changed) |> assign(:agent_alive?, true), agent_id}
 
       {:error, reason} ->
         {:error, reason}
@@ -868,6 +872,7 @@ defmodule AgentsDemoWeb.ChatLive do
           is_thread_history_open={@is_thread_history_open}
           streaming_delta={@streaming_delta}
           agent_status={@agent_status}
+          agent_alive?={@agent_alive?}
           pending_tools={@pending_tools}
           pending_question={@pending_question}
           remaining_questions_count={length(@remaining_questions)}

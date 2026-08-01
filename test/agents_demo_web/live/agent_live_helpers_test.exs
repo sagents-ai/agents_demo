@@ -589,24 +589,63 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   end
 
   describe "handle_agent_shutdown/2" do
-    test "clears agent_id from assigns" do
+    test "keeps agent_id, which is what we need to wake the agent again" do
       socket = new_socket(%{agent_id: "test-agent"})
-      shutdown_data = %{agent_id: "test-agent", reason: "inactivity_timeout"}
+
+      shutdown_data = %{
+        agent_id: "test-agent",
+        reason: :inactivity,
+        status: :idle,
+        interrupt_restorable: false
+      }
 
       result = AgentLiveHelpers.handle_agent_shutdown(socket, shutdown_data)
 
-      assert result.assigns.agent_id == nil
+      assert result.assigns.agent_id == "test-agent"
+      assert result.assigns.agent_status == :not_running
+      assert result.assigns.agent_alive? == false
     end
 
     test "preserves other assigns" do
       socket = new_socket(%{agent_id: "test-agent", conversation_id: 123, custom: "value"})
-      shutdown_data = %{agent_id: "test-agent", reason: "manual_stop"}
+
+      shutdown_data = %{
+        agent_id: "test-agent",
+        reason: :manual_stop,
+        status: :idle,
+        interrupt_restorable: false
+      }
 
       result = AgentLiveHelpers.handle_agent_shutdown(socket, shutdown_data)
 
-      assert result.assigns.agent_id == nil
       assert result.assigns.conversation_id == 123
       assert result.assigns.custom == "value"
+    end
+
+    test "leaves a restorable question on screen with the agent marked not alive" do
+      socket =
+        new_socket(%{
+          agent_id: "test-agent",
+          agent_status: :interrupted,
+          agent_alive?: true,
+          interrupt_data: %{type: :ask_user_question, tool_call_id: "call-1"},
+          pending_question: %{tool_call_id: "call-1", question: "Which one?"},
+          pending_tools: [],
+          pending_halt: nil
+        })
+
+      shutdown_data = %{
+        agent_id: "test-agent",
+        reason: :inactivity,
+        status: :interrupted,
+        interrupt_restorable: true
+      }
+
+      result = AgentLiveHelpers.handle_agent_shutdown(socket, shutdown_data)
+
+      assert result.assigns.agent_status == :interrupted
+      assert result.assigns.agent_alive? == false
+      assert result.assigns.pending_question.tool_call_id == "call-1"
     end
   end
 
@@ -1150,6 +1189,46 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
         )
 
       assert result.assigns.conversation_id == 123
+    end
+  end
+
+  describe "duplicate interrupt submissions" do
+    test "a second question submission after the first is answered is a no-op" do
+      # The click-to-select variant renders no submit button to disable, and the
+      # resume is synchronous, so a fast double click really does deliver a
+      # second event after pending_question has already been cleared. Before the
+      # guard this crashed on the missing question.
+      socket =
+        new_socket(%{
+          agent_id: "test-agent",
+          agent_status: :running,
+          pending_question: nil,
+          remaining_questions: [],
+          question_responses: []
+        })
+
+      result =
+        AgentLiveHelpers.handle_question_response(socket, %{type: :answer, selected: ["a"]})
+
+      assert result.assigns.pending_question == nil
+      assert result.assigns.agent_status == :running
+    end
+
+    test "a second HITL decision after the batch is settled is a no-op" do
+      # Falling through would hand advance_hitl_decisions/3 an empty list, which
+      # would report the batch complete and resume with a fabricated decision.
+      socket =
+        new_socket(%{
+          agent_id: "test-agent",
+          agent_status: :running,
+          pending_tools: [],
+          hitl_decisions: []
+        })
+
+      result = AgentLiveHelpers.handle_hitl_decision(socket, 0, :approve)
+
+      assert result.assigns.pending_tools == []
+      assert result.assigns.agent_status == :running
     end
   end
 end

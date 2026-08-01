@@ -351,6 +351,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   attr :streams, :any
   attr :input, :string, doc: "The user input being drafted for a new message"
   attr :agent_status, :atom, default: nil
+  attr :agent_alive?, :boolean, default: false
   attr :pending_tools, :list, default: []
   attr :pending_question, :map, default: nil
   attr :remaining_questions_count, :integer, default: 0
@@ -370,8 +371,12 @@ defmodule AgentsDemoWeb.ChatComponents do
           <.icon name="hero-chat-bubble-left-right" class="w-7 h-7 text-[var(--color-primary)]" />
           <h1 class="text-2xl font-semibold m-0">Agents Demo</h1>
 
+          <%!-- Gated on liveness, not on status. `@agent_status == :not_running`
+               would hide this for a conversation that is dormant *and* still
+               waiting on an answer, which is precisely when it is most useful
+               to see that nothing is running. --%>
           <button
-            :if={@conversation_id && @agent_status == :not_running}
+            :if={@conversation_id && !@agent_alive?}
             phx-click="wake_agent"
             class="ml-3 px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors text-sm font-medium flex items-center gap-1.5"
             type="button"
@@ -1516,14 +1521,118 @@ defmodule AgentsDemoWeb.ChatComponents do
           </div>
         <% end %>
 
-        <%= case @question.response_type do %>
-          <% :single_select -> %>
-            <%= if @question.allow_other do %>
-              <%!-- Form-based single select with "Other" option --%>
+        <%!-- Everything the user can type into or select lives inside an ignored
+             region, keyed on this question's tool_call_id.
+
+             Why: any diff at all makes LiveView patch this container, and
+             morphdom resyncs a TEXTAREA's value from the server's HTML for every
+             element that is not document.activeElement. The server never renders
+             what the user typed, so a half-written "Other" answer is wiped by an
+             unrelated assign change — and there is now a guaranteed one: the
+             agent going to sleep flips agent_alive?, which the header reads.
+
+             The id changing is what lets the next question in a batch render:
+             morphdom replaces the subtree wholesale rather than diffing into it.
+             restore_interrupt_data/1 injects each ToolResult's own tool_call_id,
+             so ids are distinct per question on both the live and restored path.
+
+             The QuestionForm hook still works. Ignored nodes are real DOM, and
+             the hook reads radio/checkbox state with querySelectorAll and drives
+             its own updates from a change listener rather than from LiveView
+             patches. --%>
+        <div id={"question-body-#{@question.tool_call_id}"} phx-update="ignore">
+          <%= case @question.response_type do %>
+            <% :single_select -> %>
+              <%= if @question.allow_other do %>
+                <%!-- Form-based single select with "Other" option --%>
+                <form
+                  phx-submit="question_single_submit"
+                  phx-hook="QuestionForm"
+                  id="question-single-form"
+                  class="mb-4"
+                >
+                  <div class="space-y-2 mb-4">
+                    <label
+                      :for={option <- @question.options}
+                      class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150"
+                    >
+                      <input
+                        type="radio"
+                        name="selected"
+                        value={option.value}
+                        class="mt-0.5 w-4 h-4 border-blue-400 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div>
+                        <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {option.label}
+                        </div>
+                        <%= if option.description do %>
+                          <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            {option.description}
+                          </div>
+                        <% end %>
+                      </div>
+                    </label>
+                    <label class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150">
+                      <input
+                        type="radio"
+                        name="selected"
+                        value="other"
+                        class="mt-0.5 w-4 h-4 border-blue-400 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div class="flex-1">
+                        <div class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                          Other
+                        </div>
+                        <textarea
+                          name="other_text"
+                          rows="2"
+                          disabled
+                          data-other-input
+                          placeholder="Describe your choice..."
+                          class="w-full px-3 py-2 text-sm border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y opacity-40 transition-opacity duration-150"
+                        ></textarea>
+                      </div>
+                    </label>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled
+                    data-submit-btn
+                    class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors duration-150 opacity-40 cursor-not-allowed"
+                  >
+                    Submit
+                  </button>
+                </form>
+              <% else %>
+                <%!-- Click-to-select single select (no "Other") --%>
+                <div class="space-y-2 mb-4">
+                  <div
+                    :for={option <- @question.options}
+                    phx-click="question_select"
+                    phx-value-value={option.value}
+                    class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150"
+                  >
+                    <div class="w-4 h-4 mt-0.5 rounded-full border-2 border-blue-400 dark:border-blue-500 flex-shrink-0">
+                    </div>
+                    <div>
+                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {option.label}
+                      </div>
+                      <%= if option.description do %>
+                        <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          {option.description}
+                        </div>
+                      <% end %>
+                    </div>
+                  </div>
+                </div>
+              <% end %>
+            <% :multi_select -> %>
               <form
-                phx-submit="question_single_submit"
+                phx-submit="question_multi_submit"
                 phx-hook="QuestionForm"
-                id="question-single-form"
+                id="question-multi-form"
                 class="mb-4"
               >
                 <div class="space-y-2 mb-4">
@@ -1532,10 +1641,10 @@ defmodule AgentsDemoWeb.ChatComponents do
                     class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150"
                   >
                     <input
-                      type="radio"
-                      name="selected"
+                      type="checkbox"
+                      name="selected[]"
                       value={option.value}
-                      class="mt-0.5 w-4 h-4 border-blue-400 text-blue-600 focus:ring-blue-500"
+                      class="mt-0.5 w-4 h-4 rounded border-blue-400 text-blue-600 focus:ring-blue-500"
                     />
                     <div>
                       <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -1548,27 +1657,29 @@ defmodule AgentsDemoWeb.ChatComponents do
                       <% end %>
                     </div>
                   </label>
-                  <label class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150">
-                    <input
-                      type="radio"
-                      name="selected"
-                      value="other"
-                      class="mt-0.5 w-4 h-4 border-blue-400 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div class="flex-1">
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        Other
+                  <%= if @question.allow_other do %>
+                    <label class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150">
+                      <input
+                        type="checkbox"
+                        name="selected[]"
+                        value="other"
+                        class="mt-0.5 w-4 h-4 rounded border-blue-400 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div class="flex-1">
+                        <div class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                          Other
+                        </div>
+                        <textarea
+                          name="other_text"
+                          rows="2"
+                          disabled
+                          data-other-input
+                          placeholder="Describe your choice..."
+                          class="w-full px-3 py-2 text-sm border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y opacity-40 transition-opacity duration-150"
+                        ></textarea>
                       </div>
-                      <textarea
-                        name="other_text"
-                        rows="2"
-                        disabled
-                        data-other-input
-                        placeholder="Describe your choice..."
-                        class="w-full px-3 py-2 text-sm border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y opacity-40 transition-opacity duration-150"
-                      ></textarea>
-                    </div>
-                  </label>
+                    </label>
+                  <% end %>
                 </div>
                 <button
                   type="submit"
@@ -1579,108 +1690,23 @@ defmodule AgentsDemoWeb.ChatComponents do
                   Submit
                 </button>
               </form>
-            <% else %>
-              <%!-- Click-to-select single select (no "Other") --%>
-              <div class="space-y-2 mb-4">
-                <div
-                  :for={option <- @question.options}
-                  phx-click="question_select"
-                  phx-value-value={option.value}
-                  class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150"
+            <% :freeform -> %>
+              <form phx-submit="question_freeform_submit" id="question-freeform-form" class="mb-4">
+                <textarea
+                  name="text"
+                  rows="3"
+                  placeholder="Type your response..."
+                  class="w-full px-3 py-2 text-sm border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y mb-3"
+                ></textarea>
+                <button
+                  type="submit"
+                  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors duration-150"
                 >
-                  <div class="w-4 h-4 mt-0.5 rounded-full border-2 border-blue-400 dark:border-blue-500 flex-shrink-0">
-                  </div>
-                  <div>
-                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {option.label}
-                    </div>
-                    <%= if option.description do %>
-                      <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {option.description}
-                      </div>
-                    <% end %>
-                  </div>
-                </div>
-              </div>
-            <% end %>
-          <% :multi_select -> %>
-            <form
-              phx-submit="question_multi_submit"
-              phx-hook="QuestionForm"
-              id="question-multi-form"
-              class="mb-4"
-            >
-              <div class="space-y-2 mb-4">
-                <label
-                  :for={option <- @question.options}
-                  class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150"
-                >
-                  <input
-                    type="checkbox"
-                    name="selected[]"
-                    value={option.value}
-                    class="mt-0.5 w-4 h-4 rounded border-blue-400 text-blue-600 focus:ring-blue-500"
-                  />
-                  <div>
-                    <div class="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {option.label}
-                    </div>
-                    <%= if option.description do %>
-                      <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {option.description}
-                      </div>
-                    <% end %>
-                  </div>
-                </label>
-                <%= if @question.allow_other do %>
-                  <label class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-700 rounded-lg cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition-all duration-150">
-                    <input
-                      type="checkbox"
-                      name="selected[]"
-                      value="other"
-                      class="mt-0.5 w-4 h-4 rounded border-blue-400 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div class="flex-1">
-                      <div class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        Other
-                      </div>
-                      <textarea
-                        name="other_text"
-                        rows="2"
-                        disabled
-                        data-other-input
-                        placeholder="Describe your choice..."
-                        class="w-full px-3 py-2 text-sm border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y opacity-40 transition-opacity duration-150"
-                      ></textarea>
-                    </div>
-                  </label>
-                <% end %>
-              </div>
-              <button
-                type="submit"
-                disabled
-                data-submit-btn
-                class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors duration-150 opacity-40 cursor-not-allowed"
-              >
-                Submit
-              </button>
-            </form>
-          <% :freeform -> %>
-            <form phx-submit="question_freeform_submit" id="question-freeform-form" class="mb-4">
-              <textarea
-                name="text"
-                rows="3"
-                placeholder="Type your response..."
-                class="w-full px-3 py-2 text-sm border border-blue-200 dark:border-blue-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y mb-3"
-              ></textarea>
-              <button
-                type="submit"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors duration-150"
-              >
-                Submit
-              </button>
-            </form>
-        <% end %>
+                  Submit
+                </button>
+              </form>
+          <% end %>
+        </div>
 
         <%= if @question.allow_cancel do %>
           <button
