@@ -15,8 +15,15 @@ defmodule AgentsDemo.Application do
       {Phoenix.PubSub, name: AgentsDemo.PubSub},
       AgentsDemoWeb.Presence,
       # Sagents infrastructure (registry + dynamic supervisors).
-      # Must be after Repo/PubSub so agents shut down before them (reverse order),
+      #
+      # After Repo/PubSub so agents shut down before them (reverse order),
       # allowing terminate/2 to persist state and broadcast shutdown events.
+      #
+      # Before the Endpoint for the same reason read the other direction: OTP
+      # stops children in reverse, so the Endpoint stops accepting requests
+      # first and the registry is still alive to serve whatever is in flight.
+      # Listed after the Endpoint instead, every request for the rest of the
+      # drain would land on a dead registry.
       Sagents.Supervisor,
       # Start to serve requests, typically the last entry
       AgentsDemoWeb.Endpoint

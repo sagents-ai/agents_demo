@@ -161,20 +161,21 @@ defmodule AgentsDemoWeb.ChatLive do
                |> assign(:loading, true)}
 
             {:error, reason} ->
-              Logger.error("Failed to execute agent: #{inspect(reason)}")
-
               {:noreply,
                socket
                |> assign(:loading, false)
-               |> put_flash(:error, "Failed to start agent: #{inspect(reason)}")}
+               |> AgentLiveHelpers.flash_session_error(reason,
+                 log_label: "failed to execute agent",
+                 user_message: "Your message could not be sent. Please try again."
+               )}
           end
 
         {:error, reason} ->
-          Logger.error("Failed to ensure agent running: #{inspect(reason)}")
-
           {:noreply,
-           socket
-           |> put_flash(:error, "Failed to start agent session: #{inspect(reason)}")}
+           AgentLiveHelpers.flash_session_error(socket, reason,
+             log_label: "failed to ensure agent running",
+             user_message: "The conversation could not be started. Please try again."
+           )}
       end
     end
   end
@@ -472,8 +473,11 @@ defmodule AgentsDemoWeb.ChatLive do
         {:noreply, put_flash(socket, :info, "Agent activated and ready for debugging")}
 
       {:error, reason} ->
-        Logger.error("Failed to wake agent: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "Failed to activate agent: #{inspect(reason)}")}
+        {:noreply,
+         AgentLiveHelpers.flash_session_error(socket, reason,
+           log_label: "failed to wake agent",
+           user_message: "The agent could not be activated. Please try again."
+         )}
     end
   end
 

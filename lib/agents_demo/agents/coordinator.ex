@@ -145,11 +145,26 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   Note: agents automatically stop after inactivity timeout. Only call this
   for explicit cleanup (e.g., conversation archival).
+
+  Returns `{:ok, :stopped}`, `{:ok, :not_running}`, or
+  `{:error, :registry_unavailable}` when this node cannot answer registry
+  lookups at all.
   """
   def stop_conversation_session(conversation_id),
     do: Sagents.Session.stop(@config, conversation_id)
 
-  @doc "Whether an agent session is currently running for `conversation_id`."
+  @doc """
+  Whether an agent session is currently running for `conversation_id`.
+
+  Raises `Sagents.RegistryUnavailableError` when this node's registry cannot
+  answer, which covers the drain window of a rolling deploy. A boolean has no
+  room for "cannot tell", and `false` reads as "nothing is running", which a
+  caller responds to by starting a duplicate agent for a conversation that
+  already has one on another node.
+
+  Anywhere a web request can reach, prefer `ensure_agent_session_running/2`,
+  which reports the condition as `{:error, :registry_unavailable}` instead.
+  """
   def session_running?(conversation_id),
     do: Sagents.Session.running?(@config, conversation_id)
 

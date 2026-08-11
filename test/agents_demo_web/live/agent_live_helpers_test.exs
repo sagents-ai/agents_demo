@@ -937,6 +937,21 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.agent_status == :not_running
     end
 
+    test "returns {:error, socket} without touching the registry while draining" do
+      socket = new_socket()
+      scope = {:user, 1}
+
+      stub(Sagents, :ready?, fn -> false end)
+
+      # No stubs for Conversations, Coordinator, Subscriber or AgentServer: the
+      # guard has to return before any of them is reached. Reaching them on a
+      # draining node is the failure, since AgentServer.get_status/1 raises
+      # Sagents.RegistryUnavailableError past its own catch clause.
+      {:error, result} = AgentLiveHelpers.load_conversation(socket, 123, scope: scope)
+
+      assert result.assigns.flash["error"] =~ "restarting"
+    end
+
     test "returns {:error, socket} with flash when conversation not found" do
       socket = new_socket()
       scope = {:user, 1}
@@ -1229,6 +1244,37 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       assert result.assigns.pending_tools == []
       assert result.assigns.agent_status == :running
+    end
+  end
+
+  describe "flash_session_error/3" do
+    @copy [log_label: "resume failed", user_message: "That could not be saved."]
+
+    test "shows the caller's product copy for an ordinary failure" do
+      result =
+        AgentLiveHelpers.flash_session_error(
+          new_socket(),
+          "Cannot resume, server is not interrupted",
+          @copy
+        )
+
+      assert result.assigns.flash["error"] == "That could not be saved."
+    end
+
+    test "shows retry copy for a draining node instead of the caller's message" do
+      # :registry_unavailable is not a failure of the request. Every other node
+      # serves it fine, and the client's reconnect lands on one of them, so
+      # "try again" is the accurate instruction rather than a euphemism.
+      result =
+        AgentLiveHelpers.flash_session_error(new_socket(), :registry_unavailable, @copy)
+
+      assert result.assigns.flash["error"] =~ "restarting"
+    end
+
+    test "never puts the raw reason term in front of the user" do
+      result = AgentLiveHelpers.flash_session_error(new_socket(), {:shutdown, :boom}, @copy)
+
+      refute result.assigns.flash["error"] =~ "shutdown"
     end
   end
 end
