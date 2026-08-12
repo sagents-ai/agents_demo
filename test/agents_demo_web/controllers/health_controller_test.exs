@@ -24,6 +24,12 @@ defmodule AgentsDemoWeb.HealthControllerTest do
       assert response(conn, 200) == "ok"
     end
 
+    test "sets a content type, so text_response/2 works in tests", %{conn: conn} do
+      # send_resp/3 alone sets none, and text_response/2 then raises
+      # "no content-type was set, expected a text response".
+      assert text_response(get(conn, ~p"/health/ready"), 200) == "ok"
+    end
+
     test "answers 503 while this node is draining", %{conn: conn} do
       stub(Sagents, :ready?, fn -> false end)
 

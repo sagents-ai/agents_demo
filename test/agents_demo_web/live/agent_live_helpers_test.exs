@@ -1265,10 +1265,26 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       # :registry_unavailable is not a failure of the request. Every other node
       # serves it fine, and the client's reconnect lands on one of them, so
       # "try again" is the accurate instruction rather than a euphemism.
+      #
+      # Asserted against draining_message/0 rather than the literal: the copy is
+      # meant to be reworded, and a test pinned to the string keeps passing
+      # through the rewording that would break it.
       result =
         AgentLiveHelpers.flash_session_error(new_socket(), :registry_unavailable, @copy)
 
-      assert result.assigns.flash["error"] =~ "restarting"
+      assert result.assigns.flash["error"] == AgentLiveHelpers.draining_message()
+    end
+
+    test "the two failures do not share copy" do
+      # The property that actually matters, and the one a pair of literal
+      # assertions cannot state: whatever the wording, a draining node must not
+      # tell the user the same thing a real failure does.
+      draining =
+        AgentLiveHelpers.flash_session_error(new_socket(), :registry_unavailable, @copy)
+
+      other = AgentLiveHelpers.flash_session_error(new_socket(), :boom, @copy)
+
+      refute draining.assigns.flash["error"] == other.assigns.flash["error"]
     end
 
     test "never puts the raw reason term in front of the user" do

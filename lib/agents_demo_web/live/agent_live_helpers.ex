@@ -626,6 +626,15 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   # ===========================================================================
 
   @doc """
+  The copy shown when this node cannot host agent sessions.
+
+  Exposed so tests can assert *which* message a path produced without
+  hardcoding the string. A test that inlines the literal keeps passing after
+  someone rewords the copy, which is the moment it stops testing anything.
+  """
+  def draining_message, do: @draining_message
+
+  @doc """
   Log a failed session action and flash product copy describing it.
 
   `copy` carries two deliberately separate strings:

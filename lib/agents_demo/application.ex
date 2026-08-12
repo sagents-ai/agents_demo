@@ -25,14 +25,26 @@ defmodule AgentsDemo.Application do
       # Listed after the Endpoint instead, every request for the rest of the
       # drain would land on a dead registry.
       Sagents.Supervisor,
-      # Start to serve requests, typically the last entry
-      AgentsDemoWeb.Endpoint
+      # Serves requests. After Sagents.Supervisor so OTP stops the listener
+      # first and the registry is still alive for whatever is in flight.
+      AgentsDemoWeb.Endpoint,
+      # Last, so OTP stops it FIRST: its terminate/2 flips readiness to false
+      # and waits, while the Endpoint above is still up to report it. Any
+      # earlier position and the wait happens behind a stopped listener, where
+      # the load balancer cannot observe it.
+      {AgentsDemo.Drain, delay: drain_delay()}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: AgentsDemo.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Zero in dev and test. A drain delay that fires on every Ctrl-C is a delay
+  # someone disables in week two, and then it is not there in production either.
+  defp drain_delay do
+    Application.get_env(:agents_demo, :drain_delay_ms, 0)
   end
 
   # Tell Phoenix to update the endpoint configuration
