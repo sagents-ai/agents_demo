@@ -194,7 +194,8 @@ defmodule AgentsDemo.Conversations.DisplayMessage do
          "call_id" => _call_id,
          "name" => _name,
          "arguments" => _arguments
-       }), do: :ok
+       }),
+       do: :ok
 
   defp validate_content("tool_result", %{
          "tool_call_id" => _tool_call_id,

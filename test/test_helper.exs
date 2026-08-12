@@ -4,6 +4,11 @@
 Mimic.copy(LangChain.ChatModels.ChatAnthropic)
 Mimic.copy(LangChain.ChatModels.ChatOpenAI)
 
+# Readiness reports whether this node can host agents. The false branch only
+# happens while Sagents.Supervisor is down, which is not a state the test suite
+# can enter without taking every other test's agents with it.
+Mimic.copy(Sagents)
+
 ExUnit.start(exclude: [:web_tool, :live_call], capture_log: true)
 # ExUnit.start(exclude: [:web_tool], capture_log: false)
 

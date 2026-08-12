@@ -78,6 +78,18 @@ defmodule AgentsDemo.Agents.DemoSetup do
 
         error
 
+      {:error, :registry_unavailable} = error ->
+        # This node is draining. Sagents deliberately does not start a
+        # filesystem it cannot first check for, since it cannot see whether one
+        # already exists elsewhere. A routine deploy, so :warning rather than
+        # :error: logging it as a failure trains people to ignore the level.
+        Logger.warning(
+          "Filesystem for user #{user_id} not started: this node is draining, " <>
+            "its Sagents registry is unavailable"
+        )
+
+        error
+
       {:error, reason} = error ->
         # Actual errors should be logged at error level
         Logger.error("Failed to start filesystem for user #{user_id}: #{inspect(reason)}")

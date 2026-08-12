@@ -23,6 +23,19 @@ defmodule AgentsDemoWeb.Router do
     live "/", WelcomeLive
   end
 
+  # Platform probes. Deliberately in no pipeline at all: they must not require a
+  # session, must not be behind authentication, and must not content-negotiate,
+  # because a probe that sends no Accept header would then be answered 406 and
+  # read as an unhealthy node.
+  #
+  # `/health/ready` is the signal that keeps the load balancer from routing to a
+  # node whose Sagents supervision tree has already stopped. See
+  # `AgentsDemoWeb.HealthController`.
+  scope "/health", AgentsDemoWeb do
+    get "/alive", HealthController, :alive
+    get "/ready", HealthController, :ready
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", AgentsDemoWeb do
   #   pipe_through :api
