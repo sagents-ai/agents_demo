@@ -14,6 +14,12 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
   # whose closer hasn't streamed in yet.
   @trailing_tilde "5. **Style Guide** (~1,486 words)"
 
+  @json_fence """
+  ```json
+  {"name": "search", "limit": 10}
+  ```
+  """
+
   describe "markdown/1" do
     defp render_md(assigns) do
       render_component(&ChatComponents.markdown/1, assigns)
@@ -43,6 +49,37 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
 
       assert render_md(%{text: "this is ~~struck~~ text", streaming: true}) =~
                "<del>struck</del>"
+    end
+
+    test "a fenced code block is syntax highlighted" do
+      html = render_md(%{text: @json_fence})
+
+      # Lumis wraps each token in a `<span>` whose color is a CSS `light-dark()`
+      # pair. Unhighlighted MDEx output has no spans inside the `<code>` at all.
+      assert html =~ "language-json"
+      assert html =~ "lumis lumis-themes"
+      assert html =~ "color: light-dark("
+
+      # Punctuation, keys, string values and numbers must not all collapse to a
+      # single foreground color - distinct colors are the point of highlighting.
+      distinct_colors =
+        ~r/color: (light-dark\([^)]*\))/
+        |> Regex.scan(html, capture: :all_but_first)
+        |> MapSet.new()
+
+      assert MapSet.size(distinct_colors) >= 4
+    end
+
+    test "a code block with an unknown language still renders its content" do
+      html = render_md(%{text: "```notalanguage\nhello world\n```"})
+
+      assert html =~ "hello world"
+    end
+
+    test "streaming content is syntax highlighted too" do
+      html = render_md(%{text: @json_fence, streaming: true})
+
+      assert html =~ "color: light-dark("
     end
   end
 

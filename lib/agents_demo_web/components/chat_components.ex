@@ -661,8 +661,56 @@ defmodule AgentsDemoWeb.ChatComponents do
           content_text={get_in(@message.content, ["text"]) || ""}
         />
     <% end %>
+
+    <%!-- Sibling of the message body, never nested inside it. A thinking block
+    keeps its body in a collapsed div, so a note placed within one is invisible
+    to the reader who is wondering why the response stopped. --%>
+    <.stop_reason_note
+      reason={get_in(@message.content, ["stop_reason"])}
+      details={get_in(@message.content, ["stop_details"])}
+    />
     """
   end
+
+  attr :reason, :string, default: nil
+  attr :details, :map, default: nil
+
+  # Component: Stop Reason Note
+  #
+  # Marks a message the model did not finish. The framework stamps
+  # `content["stop_reason"]` on the last item a message produced, so a finished
+  # message has no key here and nothing renders.
+  #
+  # The wording is a statement about the message, not the conversation: none of
+  # these block the next turn, and the author's following message is answered
+  # normally.
+  defp stop_reason_note(%{reason: nil} = assigns), do: ~H""
+
+  defp stop_reason_note(assigns) do
+    ~H"""
+    <div
+      class="px-4 py-0.5 flex justify-end"
+      data-stop-reason={@reason}
+      title={@details && @details["explanation"]}
+    >
+      <span class="text-xs italic text-[var(--color-error)]">
+        {stop_reason_text(@reason, @details)}
+      </span>
+    </div>
+    """
+  end
+
+  defp stop_reason_text("length", _details), do: "Response stopped: reached the length limit"
+  defp stop_reason_text("stream_error", _details), do: "Response stopped: connection error"
+  defp stop_reason_text("cancelled", _details), do: "Response stopped"
+
+  defp stop_reason_text("content_filtered", %{"category" => category})
+       when is_binary(category) and category != "" do
+    "Response declined (#{category})"
+  end
+
+  defp stop_reason_text("content_filtered", _details), do: "Response declined"
+  defp stop_reason_text(_reason, _details), do: "Response stopped"
 
   # Component: Text Message (normal message display)
   defp text_message(assigns) do
@@ -1763,6 +1811,17 @@ defmodule AgentsDemoWeb.ChatComponents do
       ],
       render: [
         unsafe_: true
+      ],
+      # `light-dark()` resolves against the `color-scheme` the active daisyUI
+      # theme declares, so highlighted code follows the light/dark toggle in the
+      # layout as well as the system preference.
+      syntax_highlight: [
+        engine: :lumis,
+        opts: [
+          formatter:
+            {:html_multi_themes,
+             themes: [light: "github_light", dark: "github_dark"], default_theme: "light-dark()"}
+        ]
       ]
     ]
   end
