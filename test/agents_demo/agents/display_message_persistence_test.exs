@@ -5,6 +5,7 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistenceTest do
   alias AgentsDemo.Conversations
   alias AgentsDemo.Conversations.DisplayMessage
   alias LangChain.Message
+  alias LangChain.Message.ContentPart
   alias LangChain.Message.ToolCall
   alias LangChain.Message.ToolResult
 
@@ -147,6 +148,115 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistenceTest do
 
       assert msg.content_type == "text"
       assert is_nil(msg.tool_call_id)
+    end
+  end
+
+  describe "save_message/3 sequence assignment" do
+    test "assigns an ascending sequence across the items of one message" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message =
+        Message.new_assistant!(%{
+          content: [ContentPart.thinking!("Let me look"), ContentPart.text!("Searching now")],
+          tool_calls: [
+            ToolCall.new!(%{call_id: "call_abc", name: "search", arguments: %{"q" => "elixir"}})
+          ]
+        })
+
+      assert {:ok, rows} = DisplayMessagePersistence.save_message(scope, message, context)
+
+      assert [0, 1, 2] == Enum.map(rows, & &1.sequence)
+      assert ["thinking", "text", "tool_call"] == Enum.map(rows, & &1.content_type)
+    end
+
+    test "the parts of one message load back in production order" do
+      # End-to-end cover for the path the UI actually reads: it reloads after
+      # every save rather than appending. This does not by itself pin the
+      # sequence values — the assertion on ascending sequence above is what
+      # catches those going flat.
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message =
+        Message.new_assistant!(%{
+          content: [ContentPart.thinking!("Let me look"), ContentPart.text!("Here it is")]
+        })
+
+      assert {:ok, _rows} = DisplayMessagePersistence.save_message(scope, message, context)
+
+      assert ["thinking", "text"] ==
+               scope
+               |> Conversations.load_display_messages(conversation.id)
+               |> Enum.map(& &1.content_type)
+    end
+
+    test "a single-item message still gets sequence 0" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message = Message.new_assistant!("Just text.")
+
+      assert {:ok, [%DisplayMessage{sequence: 0}]} =
+               DisplayMessagePersistence.save_message(scope, message, context)
+    end
+  end
+
+  describe "save_message/3 stop reason" do
+    test "carries the stop reason and provider detail into persisted content" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      details = %{"type" => "refusal", "category" => "cyber"}
+
+      message = %Message{
+        role: :assistant,
+        content: [ContentPart.text!("I can't help with")],
+        status: :content_filtered,
+        metadata: %{stop_details: details}
+      }
+
+      assert {:ok, [%DisplayMessage{} = msg]} =
+               DisplayMessagePersistence.save_message(scope, message, context)
+
+      assert msg.content["stop_reason"] == "content_filtered"
+      assert msg.content["stop_details"] == details
+    end
+
+    test "marks only the last item of a multi-part message" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message = %Message{
+        role: :assistant,
+        content: [ContentPart.thinking!("Working through"), ContentPart.text!("Here is the")],
+        status: :length
+      }
+
+      assert {:ok, [thinking, text]} =
+               DisplayMessagePersistence.save_message(scope, message, context)
+
+      refute Map.has_key?(thinking.content, "stop_reason")
+      assert text.content["stop_reason"] == "length"
+    end
+
+    test "a finished message writes no stop_reason key" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message = Message.new_assistant!("All done.")
+
+      assert {:ok, [%DisplayMessage{} = msg]} =
+               DisplayMessagePersistence.save_message(scope, message, context)
+
+      refute Map.has_key?(msg.content, "stop_reason")
+      refute Map.has_key?(msg.content, "stop_details")
     end
   end
 end

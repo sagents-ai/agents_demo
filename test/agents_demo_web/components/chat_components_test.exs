@@ -101,6 +101,96 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
     end
   end
 
+  describe "stop reason note via message/1" do
+    defp render_message(content_type, content) do
+      render_component(&ChatComponents.message/1, %{
+        message: %{
+          id: 42,
+          message_type: "assistant",
+          content_type: content_type,
+          content: content
+        }
+      })
+    end
+
+    # query/2 rather than filter/2: filter keeps only matching *root* nodes, so
+    # a descendant selector against it always comes back empty and every
+    # negative assertion below would hold for the wrong reason.
+    defp note_nodes(html, selector) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(selector)
+      |> Enum.to_list()
+    end
+
+    test "the note is not a descendant of the collapsed thinking container" do
+      # The reported failure: a response cut off inside a thinking block. That
+      # block's body sits in a `hidden` div, so asserting only that the text
+      # appears somewhere in the HTML passes while the note is invisible —
+      # which is the original bug exactly. Assert the structure instead.
+      html = render_message("thinking", %{"text" => "Working through", "stop_reason" => "length"})
+
+      # Guard the negative assertion below against going vacuous: if the
+      # collapsed container stopped rendering, or its id changed, the
+      # descendant selector would match nothing for the wrong reason.
+      assert [container] = note_nodes(html, "#thinking-42")
+      assert LazyHTML.attribute(container, "class") |> List.first() =~ "hidden"
+
+      assert [_note] = note_nodes(html, "[data-stop-reason]")
+      assert [] == note_nodes(html, "#thinking-42 [data-stop-reason]")
+    end
+
+    test "a finished message renders no note" do
+      html = render_message("text", %{"text" => "All done"})
+
+      assert [] == note_nodes(html, "[data-stop-reason]")
+    end
+
+    test "each reason gets its own wording" do
+      for {reason, expected} <- [
+            {"length", "reached the length limit"},
+            {"stream_error", "connection error"},
+            {"cancelled", "Response stopped"},
+            {"content_filtered", "Response declined"}
+          ] do
+        html = render_message("text", %{"text" => "Partial", "stop_reason" => reason})
+
+        assert [node] = note_nodes(html, "[data-stop-reason=\"#{reason}\"]")
+        assert LazyHTML.text(node) =~ expected
+      end
+    end
+
+    test "a refusal names the category and keeps the explanation out of the line" do
+      html =
+        render_message("text", %{
+          "text" => "I can't help with",
+          "stop_reason" => "content_filtered",
+          "stop_details" => %{
+            "type" => "refusal",
+            "category" => "cyber",
+            "explanation" => "Declined to assist."
+          }
+        })
+
+      assert [node] = note_nodes(html, "[data-stop-reason]")
+      assert LazyHTML.text(node) =~ "Response declined (cyber)"
+      refute LazyHTML.text(node) =~ "Declined to assist."
+      assert [_titled] = note_nodes(html, "[title=\"Declined to assist.\"]")
+    end
+
+    test "a refusal with no category falls back to the bare wording" do
+      html =
+        render_message("text", %{
+          "text" => "I can't help with",
+          "stop_reason" => "content_filtered",
+          "stop_details" => %{"type" => "refusal"}
+        })
+
+      assert [node] = note_nodes(html, "[data-stop-reason]")
+      assert LazyHTML.text(node) =~ "Response declined"
+    end
+  end
+
   describe "streaming_message/1" do
     defp delta(parts) do
       %{streaming_delta: %MessageDelta{merged_content: parts, tool_calls: []}}
