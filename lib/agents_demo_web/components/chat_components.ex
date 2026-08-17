@@ -622,53 +622,98 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
-  attr :message, :any, required: true
+  attr :message, :any, required: true, doc: "A DisplayMessage struct"
   attr :debug_mode, :boolean, default: false
 
   # Component: Individual Message
   # Expects a DisplayMessage struct
   def message(assigns) do
-    # Route to appropriate component based on content_type
     ~H"""
-    <%= case @message.content_type do %>
-      <% "thinking" -> %>
-        <.thinking_display
-          message_id={@message.id}
-          content_text={get_in(@message.content, ["text"]) || ""}
-        />
-      <% "tool_call" -> %>
-        <.tool_call_message message={@message} debug_mode={@debug_mode} />
-      <% "tool_result" -> %>
-        <%= if @debug_mode do %>
-          <.tool_result_display
-            tool_call_id={get_in(@message.content, ["tool_call_id"])}
-            name={get_in(@message.content, ["name"])}
-            content={get_in(@message.content, ["content"])}
-            is_error={get_in(@message.content, ["is_error"]) || false}
-            is_interrupt={get_in(@message.content, ["is_interrupt"]) || false}
-            hitl_decision={get_in(@message.content, ["hitl_decision"])}
-          />
-        <% end %>
-      <% "notification" -> %>
-        <div class="px-4 py-1 text-sm italic text-[var(--color-text-secondary)]">
-          {get_in(@message.content, ["text"])}
-        </div>
-      <% "todo_snapshot" -> %>
-        <.todo_snapshot_display message={@message} />
-      <% _other -> %>
-        <.text_message
-          message={@message}
-          content_text={get_in(@message.content, ["text"]) || ""}
-        />
-    <% end %>
+    <.message_body message={@message} debug_mode={@debug_mode} />
 
     <%!-- Sibling of the message body, never nested inside it. A thinking block
     keeps its body in a collapsed div, so a note placed within one is invisible
-    to the reader who is wondering why the response stopped. --%>
+    to the reader who is wondering why the response stopped.
+
+    The note annotates model output. A notification or error row is written by
+    the framework and already says why it is there, so annotating it would state
+    the same thing twice. Those rows still carry `stop_reason`, which is what a
+    renderer keying off the classification rather than the prose would use. --%>
     <.stop_reason_note
+      :if={@message.content_type not in ~w(notification error)}
       reason={get_in(@message.content, ["stop_reason"])}
       details={get_in(@message.content, ["stop_details"])}
     />
+    """
+  end
+
+  attr :message, :any, required: true
+  attr :debug_mode, :boolean, default: false
+
+  # Component: Message Body
+  #
+  # One clause per `content_type` a DisplayMessage carries. The last clause is
+  # the catch-all: a row whose type has no dedicated renderer shows its `text`,
+  # which is what plain user and assistant messages want.
+  defp message_body(%{message: %{content_type: "thinking"}} = assigns) do
+    ~H"""
+    <.thinking_display
+      message_id={@message.id}
+      content_text={get_in(@message.content, ["text"]) || ""}
+    />
+    """
+  end
+
+  defp message_body(%{message: %{content_type: "tool_call"}} = assigns) do
+    ~H"""
+    <.tool_call_message message={@message} debug_mode={@debug_mode} />
+    """
+  end
+
+  # A tool result is the raw payload handed back to the model. The friendly
+  # view of the same exchange is the tool call row's status, so this renders
+  # only in debug mode.
+  defp message_body(%{message: %{content_type: "tool_result"}} = assigns) do
+    ~H"""
+    <.tool_result_display
+      :if={@debug_mode}
+      tool_call_id={get_in(@message.content, ["tool_call_id"])}
+      name={get_in(@message.content, ["name"])}
+      content={get_in(@message.content, ["content"])}
+      is_error={get_in(@message.content, ["is_error"]) || false}
+      is_interrupt={get_in(@message.content, ["is_interrupt"]) || false}
+      hitl_decision={get_in(@message.content, ["hitl_decision"])}
+    />
+    """
+  end
+
+  defp message_body(%{message: %{content_type: "notification"}} = assigns) do
+    ~H"""
+    <div class="px-4 py-1 text-sm italic text-[var(--color-text-secondary)]">
+      {get_in(@message.content, ["text"])}
+    </div>
+    """
+  end
+
+  defp message_body(%{message: %{content_type: "error"}} = assigns) do
+    ~H"""
+    <div class="px-4 py-1.5 rounded-lg border border-[var(--color-error)]/40 bg-[var(--color-error)]/5">
+      <span class="text-sm text-[var(--color-error)]">
+        {get_in(@message.content, ["text"])}
+      </span>
+    </div>
+    """
+  end
+
+  defp message_body(%{message: %{content_type: "todo_snapshot"}} = assigns) do
+    ~H"""
+    <.todo_snapshot_display message={@message} />
+    """
+  end
+
+  defp message_body(assigns) do
+    ~H"""
+    <.text_message message={@message} content_text={get_in(@message.content, ["text"]) || ""} />
     """
   end
 
