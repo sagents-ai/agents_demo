@@ -275,7 +275,7 @@ defmodule AgentsDemoWeb.ChatComponents do
       <div class="mb-4 pb-4 border-b border-[var(--color-border)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-sm font-semibold text-[var(--color-text-primary)]">
-            {@stats.completed} of {@stats.total} completed
+            {@stats.resolved} of {@stats.total} resolved
           </span>
           <span class="text-xs text-[var(--color-text-secondary)]">
             {@stats.progress_percentage}%
@@ -300,8 +300,12 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
+  # Progress tracks *resolved* items, not just completed ones. A cancelled todo
+  # needs no further work, so counting it as outstanding leaves the bar stuck
+  # short of full on a list the agent is finished with.
   defp calculate_todo_stats(todos) do
     total = length(todos)
+    resolved = Enum.count(todos, fn todo -> todo.status in [:completed, :cancelled] end)
     completed = Enum.count(todos, fn todo -> todo.status == :completed end)
     in_progress = Enum.count(todos, fn todo -> todo.status == :in_progress end)
     pending = Enum.count(todos, fn todo -> todo.status == :pending end)
@@ -309,11 +313,12 @@ defmodule AgentsDemoWeb.ChatComponents do
 
     %{
       total: total,
+      resolved: resolved,
       completed: completed,
       in_progress: in_progress,
       pending: pending,
       cancelled: cancelled,
-      progress_percentage: if(total > 0, do: round(completed / total * 100), else: 0)
+      progress_percentage: if(total > 0, do: round(resolved / total * 100), else: 0)
     }
   end
 
@@ -857,7 +862,11 @@ defmodule AgentsDemoWeb.ChatComponents do
         <.icon name="hero-clipboard-document-list" class="w-4 h-4 text-[var(--color-text-secondary)]" />
         <span class="text-sm font-medium text-[var(--color-text-primary)]">Todo list</span>
         <span :if={@summary != %{}} class="ml-auto text-xs text-[var(--color-text-tertiary)]">
-          {Map.get(@summary, "completed", 0)}/{Map.get(@summary, "total", 0)}
+          {Map.get(@summary, "completed", 0) + Map.get(@summary, "cancelled", 0)}/{Map.get(
+            @summary,
+            "total",
+            0
+          )}
         </span>
       </div>
 
@@ -879,7 +888,7 @@ defmodule AgentsDemoWeb.ChatComponents do
       </ul>
 
       <p :if={@todos == []} class="text-xs italic text-[var(--color-text-secondary)]">
-        All tasks completed.
+        All tasks resolved.
       </p>
     </div>
     """

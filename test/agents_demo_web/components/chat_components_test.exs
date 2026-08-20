@@ -375,4 +375,38 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
                ~s(phx-click="wake_agent")
     end
   end
+
+  describe "todo_items/1" do
+    defp todo(id, content, status) do
+      Sagents.Todo.new!(%{id: id, content: content, status: status})
+    end
+
+    defp render_todos(todos) do
+      render_component(&ChatComponents.todo_items/1, %{todos: todos})
+    end
+
+    test "counts a cancelled todo as resolved in the progress summary" do
+      html =
+        render_todos([
+          todo(1, "Task 1", :completed),
+          todo(2, "Task 2", :cancelled)
+        ])
+
+      assert html =~ "2 of 2 resolved"
+      assert html =~ "100%"
+    end
+
+    test "an open todo holds the summary below full" do
+      html =
+        render_todos([
+          todo(1, "Task 1", :completed),
+          todo(2, "Task 2", :cancelled),
+          todo(3, "Task 3", :pending),
+          todo(4, "Task 4", :in_progress)
+        ])
+
+      assert html =~ "2 of 4 resolved"
+      assert html =~ "50%"
+    end
+  end
 end
