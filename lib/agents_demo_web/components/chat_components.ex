@@ -335,7 +335,8 @@ defmodule AgentsDemoWeb.ChatComponents do
         @todo.status == :pending && "bg-[var(--color-text-tertiary)]",
         @todo.status == :in_progress && "bg-[var(--color-warning)]",
         @todo.status == :completed && "bg-[var(--color-success)]",
-        @todo.status == :cancelled && "bg-[var(--color-error)]"
+        @todo.status == :cancelled &&
+          "border border-[var(--color-text-tertiary)] bg-transparent"
       ]}>
       </div>
       <span class={[
@@ -918,8 +919,8 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   defp todo_status_box(%{status: "cancelled"} = assigns) do
     ~H"""
-    <span class="w-4 h-4 mt-0.5 shrink-0 rounded flex items-center justify-center bg-[var(--color-error)]">
-      <.icon name="hero-x-mark" class="w-3 h-3 text-white" />
+    <span class="w-4 h-4 mt-0.5 shrink-0 rounded border-2 border-[var(--color-text-tertiary)] flex items-center justify-center">
+      <.icon name="hero-x-mark" class="w-2.5 h-2.5 text-[var(--color-text-tertiary)]" />
     </span>
     """
   end
