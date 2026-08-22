@@ -74,18 +74,42 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   end
 
   @doc """
-  Reset all agent-related state to default values and unsubscribe from any
-  current agent.
+  Reset all agent-related state to default values, unsubscribing from the
+  current agent and releasing the viewer's presence entry.
   """
   def reset_conversation(socket) do
     socket =
       if connected?(socket) do
-        unsubscribe_current_agent(socket)
+        leave_all_conversations(socket)
       else
         socket
       end
 
     init_agent_state(socket)
+  end
+
+  # This socket shows nothing afterwards, so every viewer entry it holds goes
+  # back. `init_agent_state/1` rewrites the record on the next line, and an
+  # entry dropped from the record without being released is one Presence keeps
+  # for the life of this process.
+  defp leave_all_conversations(socket) do
+    socket = unsubscribe_current_agent(socket)
+    assign(socket, AgentSubscriberSession.clear_tracked_viewers(socket.assigns))
+  end
+
+  # Leaving one conversation for another. The release is targeted at the
+  # conversation being left rather than at everything held, so a host that also
+  # views others from this process keeps those entries.
+  defp leave_current_conversation(socket) do
+    socket = unsubscribe_current_agent(socket)
+
+    assign(
+      socket,
+      AgentSubscriberSession.remove_tracked_viewer(
+        socket.assigns,
+        socket.assigns[:conversation_id]
+      )
+    )
   end
 
   defp unsubscribe_current_agent(socket) do
@@ -104,6 +128,45 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   # ===========================================================================
   # Load conversation (load path — subscribe-only)
   # ===========================================================================
+
+  @doc """
+  Open a conversation the caller already holds, without a database read.
+
+  For the paths that create a conversation, or are handed one, and therefore
+  never reach `load_conversation/3`. Those paths assign `:conversation_id`
+  themselves before navigating, so a same-id guard on the load path can
+  short-circuit and never see the conversation at all. Routing them here is
+  what keeps their viewer presence entries from accumulating, one per
+  conversation opened per session.
+
+  Subscribing here is safe on a create path, where the agent does not exist
+  yet: `Sagents.AgentServer.subscribe/3` answers `{:error, :process_not_found}`
+  rather than raising, `Sagents.Subscriber` records the subscription as
+  `:pending`, and it upgrades to `:subscribed` once the agent appears.
+
+  ## Options
+
+  - `:user_id` - the viewer to track. Omit it and nothing is tracked, but the
+    previous entry is still released.
+  """
+  def enter_conversation(socket, conversation, opts \\ []) do
+    enter(socket, conversation, conversation.id, Keyword.get(opts, :user_id))
+  end
+
+  # The one way in. Both entry points hand over the id to key everything on:
+  # `enter_conversation/3` uses the conversation's own id, while the load path
+  # keeps the id it was called with so a host comparing `:conversation_id`
+  # against a route param still matches.
+  defp enter(socket, conversation, conversation_id, user_id) do
+    agent_id = Coordinator.conversation_agent_id(conversation_id)
+
+    socket
+    |> maybe_leave_previous_conversation(conversation_id)
+    |> assign(:conversation, conversation)
+    |> assign(:conversation_id, conversation_id)
+    |> assign(:agent_id, agent_id)
+    |> maybe_subscribe_and_track(agent_id, conversation_id, user_id)
+  end
 
   @doc """
   Load a conversation from the database and subscribe the LiveView to its
@@ -159,12 +222,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
     conversations = Keyword.get(opts, :conversations_module, Conversations)
 
     try do
-      socket = maybe_unsubscribe_previous(socket, conversation_id)
-
+      # The read comes first so a conversation that is not there leaves the
+      # socket exactly where it was. Leaving the open conversation before
+      # knowing the new one exists takes the subscription off an agent that is
+      # still on screen, and the thread goes dead while still looking fine.
       conversation = conversations.get_conversation!(scope, conversation_id)
-      agent_id = Coordinator.conversation_agent_id(conversation_id)
 
-      socket = maybe_subscribe_and_track(socket, agent_id, conversation_id, user_id)
+      socket = enter(socket, conversation, conversation_id, user_id)
+      agent_id = socket.assigns.agent_id
 
       display_messages = conversations.load_display_messages(scope, conversation_id)
       has_messages = !Enum.empty?(display_messages)
@@ -174,9 +239,6 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
       socket =
         socket
-        |> assign(:conversation, conversation)
-        |> assign(:conversation_id, conversation_id)
-        |> assign(:agent_id, agent_id)
         |> assign(:todos, saved_todos)
         |> assign(:agent_status, agent_status)
         |> assign(:agent_alive?, agent_status != :not_running)
@@ -230,10 +292,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
     end
   end
 
-  defp maybe_unsubscribe_previous(socket, conversation_id) do
+  # Guarded so the socket does not unsubscribe from, and stop viewing, the agent
+  # it is about to use. Every path that opens a conversation goes through
+  # `enter/4`, which calls this first, and that funnel is what keeps an entry
+  # from being taken without the previous one being handed back.
+  defp maybe_leave_previous_conversation(socket, conversation_id) do
     if connected?(socket) && socket.assigns[:conversation_id] &&
          socket.assigns.conversation_id != conversation_id do
-      unsubscribe_current_agent(socket)
+      leave_current_conversation(socket)
     else
       socket
     end
@@ -242,8 +308,15 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   defp maybe_subscribe_and_track(socket, agent_id, conversation_id, user_id) do
     if connected?(socket) do
       socket = subscribe_to_agent(socket, agent_id)
-      AgentSubscriberSession.maybe_track_viewer(conversation_id, user_id)
-      socket
+
+      assign(
+        socket,
+        AgentSubscriberSession.add_tracked_viewer(
+          socket.assigns,
+          conversation_id,
+          user_id
+        )
+      )
     else
       socket
     end

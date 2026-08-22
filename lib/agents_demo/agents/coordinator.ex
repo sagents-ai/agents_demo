@@ -62,6 +62,8 @@ defmodule AgentsDemo.Agents.Coordinator do
   through this same arg — no magic state-map keys.
   """
 
+  @behaviour Sagents.ViewerPresence
+
   @presence_module AgentsDemoWeb.Presence
 
   @config %{
@@ -209,17 +211,32 @@ defmodule AgentsDemo.Agents.Coordinator do
   @doc """
   Track a viewer's presence in a conversation.
 
-  Call this in your LiveView mount after the socket is connected to enable
-  smart agent shutdown — when no viewers are present and the agent becomes
-  idle, it can shutdown immediately to free resources.
+  A conversation with no viewers lets an idle agent shut down immediately
+  instead of waiting out its inactivity timeout.
+
+  Hosts that keep session state should go through
+  `AgentSubscriberSession.add_tracked_viewer/3`, or
+  `sync_tracked_viewers/2`, rather than calling this directly, so the entries
+  the session records stay truthful about what Presence holds. Calling this
+  yourself is how a hand-rolled call site that tracks and never releases gets
+  added.
   """
+  @impl Sagents.ViewerPresence
   def track_conversation_viewer(conversation_id, viewer_id, metadata \\ %{}) do
     topic = presence_topic(conversation_id)
     full_metadata = Map.merge(%{joined_at: System.system_time(:second)}, metadata)
     Sagents.Presence.track(@presence_module, topic, viewer_id, full_metadata)
   end
 
-  @doc "Untrack a viewer's presence from a conversation."
+  @doc """
+  Untrack a viewer's presence from a conversation.
+
+  As with `track_conversation_viewer/3`, hosts that keep session state should go
+  through `AgentSubscriberSession.remove_tracked_viewer/2` (or
+  `clear_tracked_viewers/1`) so the recorded entries and what Presence holds
+  cannot drift apart.
+  """
+  @impl Sagents.ViewerPresence
   def untrack_conversation_viewer(conversation_id, viewer_id) do
     topic = presence_topic(conversation_id)
     Sagents.Presence.untrack(@presence_module, topic, viewer_id)

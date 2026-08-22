@@ -92,27 +92,15 @@ defmodule AgentsDemoWeb.ChatLive do
     socket =
       cond do
         # Load conversation if conversation_id is present and different from current
+        # `load_conversation/3` releases the previous conversation's viewer
+        # entry on the way in, so there is nothing to untrack here.
         conversation_id && conversation_id != previous_conversation_id ->
-          # Untrack presence from previous conversation if connected
-          if connected?(socket) && previous_conversation_id do
-            user_id = socket.assigns.current_scope.user.id
-            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id)
-            Logger.debug("Untracked presence from conversation #{previous_conversation_id}")
-          end
-
           socket
           |> load_conversation(conversation_id)
           |> update_conversation_selection(previous_conversation_id, conversation_id)
 
         # If no conversation_id in URL, reset to fresh state
         is_nil(conversation_id) && previous_conversation_id ->
-          # Untrack presence when going back to empty state
-          if connected?(socket) do
-            user_id = socket.assigns.current_scope.user.id
-            Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id)
-            Logger.debug("Untracked presence from conversation #{previous_conversation_id}")
-          end
-
           reset_conversation_state(socket)
 
         # No change needed
@@ -210,15 +198,10 @@ defmodule AgentsDemoWeb.ChatLive do
   def handle_event("new_thread", _params, socket) do
     previous_conversation_id = socket.assigns[:conversation_id]
 
-    # Untrack presence BEFORE resetting state so AgentServer
-    # sees viewer count drop to 0 and can trigger smart shutdown
-    if previous_conversation_id && connected?(socket) do
-      user_id = socket.assigns.current_scope.user.id
-      Coordinator.untrack_conversation_viewer(previous_conversation_id, user_id)
-    end
-
     socket =
       socket
+      # Releases the viewer entry along with the subscription, so the agent
+      # sees the viewer count drop to zero and can shut down.
       |> AgentLiveHelpers.reset_conversation()
       |> assign(:page_title, "Agents Demo")
       |> assign(:selected_sub_agent, nil)
@@ -782,19 +765,15 @@ defmodule AgentsDemoWeb.ChatLive do
       {:ok, conversation} ->
         Logger.info("Created new conversation: #{conversation.id}")
 
-        agent_id = Coordinator.conversation_agent_id(conversation.id)
-
-        if connected?(socket) do
-          user_id = socket.assigns.current_scope.user.id
-          {:ok, _ref} = Coordinator.track_conversation_viewer(conversation.id, user_id)
-          Logger.debug("Tracking presence for conversation #{conversation.id}, user #{user_id}")
-        end
-
         socket =
           socket
-          |> assign(:conversation, conversation)
-          |> assign(:conversation_id, conversation.id)
-          |> assign(:agent_id, agent_id)
+          # This path holds the conversation already and never reaches
+          # `load_conversation/3`, so it enters here. Subscribing, tracking the
+          # viewer, and releasing whatever entry this socket held before all
+          # happen together.
+          |> AgentLiveHelpers.enter_conversation(conversation,
+            user_id: socket.assigns.current_scope.user.id
+          )
           |> assign(:page_title, "New Conversation - Agents Demo")
           |> push_patch(to: ~p"/chat?conversation_id=#{conversation.id}")
 

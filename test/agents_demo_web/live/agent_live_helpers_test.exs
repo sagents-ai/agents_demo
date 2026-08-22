@@ -1047,7 +1047,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
 
       AgentsDemo.Agents.Coordinator
       |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
-      |> expect(:track_conversation_viewer, fn conv_id, user_id ->
+      |> expect(:track_conversation_viewer, fn conv_id, user_id, _metadata ->
         assert conv_id == 123
         assert user_id == 1
         {:ok, :ref}
@@ -1070,6 +1070,79 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
         )
 
       assert result.assigns.sagents_subs == sample_subs
+    end
+
+    test "releases the previous conversation's viewer entry on the way in" do
+      # The leak this closes: Presence tracks the LiveView pid, which survives
+      # the switch, so an entry that is not handed back pins the conversation's
+      # agent past the idle no-viewers check it exists to satisfy.
+      socket =
+        new_socket(
+          %{conversation_id: 99, agent_id: "agent-99", tracked_viewers: %{99 => 1}},
+          [],
+          connected: true
+        )
+
+      scope = {:user, 1}
+
+      Conversations
+      |> stub(:get_conversation!, fn _scope, _other -> %{id: 123, title: "Test"} end)
+      |> stub(:load_display_messages, fn _scope, _other -> [] end)
+      |> stub(:load_todos, fn _scope, _other -> [] end)
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
+      |> expect(:untrack_conversation_viewer, fn conv_id, user_id ->
+        assert conv_id == 99
+        assert user_id == 1
+        :ok
+      end)
+      |> expect(:track_conversation_viewer, fn conv_id, user_id, _metadata ->
+        assert conv_id == 123
+        assert user_id == 1
+        {:ok, :ref}
+      end)
+
+      Sagents.Subscriber
+      |> stub(:unsubscribe_from_agent, fn subs, _agent_id -> subs end)
+      |> stub(:subscribe_to_agent, fn subs, _agent_id -> subs end)
+
+      Sagents.AgentServer
+      |> stub(:get_status, fn _other -> :not_running end)
+
+      {:ok, result} =
+        AgentLiveHelpers.load_conversation(socket, 123, scope: scope, user_id: 1)
+
+      assert result.assigns.tracked_viewers == %{123 => 1}
+    end
+
+    test "enter_conversation/3 opens a held conversation and moves the viewer" do
+      # The create path assigns :conversation_id itself and navigates, so it
+      # never reaches load_conversation/3. Without this entry point it
+      # hand-rolls a track call and nothing ever releases it.
+      socket =
+        new_socket(
+          %{conversation_id: 99, agent_id: "agent-99", tracked_viewers: %{99 => 1}},
+          [],
+          connected: true
+        )
+
+      AgentsDemo.Agents.Coordinator
+      |> stub(:conversation_agent_id, fn _other -> "agent-123" end)
+      |> expect(:untrack_conversation_viewer, fn 99, 1 -> :ok end)
+      |> expect(:track_conversation_viewer, fn 123, 1, _metadata -> {:ok, :ref} end)
+
+      Sagents.Subscriber
+      |> stub(:unsubscribe_from_agent, fn subs, _agent_id -> subs end)
+      |> stub(:subscribe_to_agent, fn subs, _agent_id -> subs end)
+
+      conversation = %{id: 123, title: "Held"}
+      result = AgentLiveHelpers.enter_conversation(socket, conversation, user_id: 1)
+
+      assert result.assigns.conversation == conversation
+      assert result.assigns.conversation_id == 123
+      assert result.assigns.agent_id == "agent-123"
+      assert result.assigns.tracked_viewers == %{123 => 1}
     end
 
     test "does not subscribe when not connected" do
