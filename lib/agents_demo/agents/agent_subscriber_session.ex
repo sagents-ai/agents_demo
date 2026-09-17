@@ -195,29 +195,42 @@ defmodule AgentsDemo.Agents.AgentSubscriberSession do
 
   @doc """
   Route a `{:DOWN, ref, ...}` from a producer crash to
-  `Sagents.Subscriber.handle_publisher_down/3`. Returns changes to apply
+  `Sagents.Subscriber.handle_publisher_down/4`. Returns changes to apply
   if the ref matched a tracked subscription, or an empty map.
   """
   def handle_publisher_down(state, ref, reason \\ :noproc) do
     subs = Map.get(state, :sagents_subs, %{})
 
-    case Subscriber.handle_publisher_down(subs, ref, reason) do
+    case Subscriber.handle_publisher_down(subs, ref, reason, report: true) do
       # The entry is now `:pending`; the next presence arrival re-subscribes.
       # Interrupt state is deliberately untouched: a crashed agent with a
       # restorable interrupt boots straight back into `:interrupted`, and one
       # without boots `:idle` and the ordinary status handler clears the UI.
-      {:matched, new_subs} -> %{sagents_subs: new_subs, agent_alive?: false}
+      #
+      # `sub_key` names the subscription that went down. This session state
+      # holds one conversation, so it is unused here. A host holding several
+      # matches on it and leaves its siblings' streaming state alone: a crash
+      # in one agent must not blank a panel that is still mid-response.
+      {:matched, _sub_key, new_subs} -> %{sagents_subs: new_subs, agent_alive?: false}
       :no_match -> %{}
     end
   end
 
   @doc """
   Route a Phoenix presence diff for the agent presence topic to
-  `Sagents.Subscriber.handle_presence_diff/3`.
+  `Sagents.Subscriber.handle_presence_diff/4`.
   """
   def handle_presence_diff(state, payload) do
     subs = Map.get(state, :sagents_subs, %{})
-    new_subs = Subscriber.handle_presence_diff(subs, Subscriber.presence_topic(), payload)
+
+    # `revived` names the subscriptions that just came back. A host holding
+    # several flips exactly those panels from offline to live. Only the map
+    # goes back into state: `sagents_subs` is a map on every path that reads
+    # it, and storing the reporting tuple instead is what makes the *next*
+    # diff fail.
+    {new_subs, _revived} =
+      Subscriber.handle_presence_diff(subs, Subscriber.presence_topic(), payload, report: true)
+
     %{sagents_subs: new_subs}
   end
 
@@ -372,10 +385,10 @@ defmodule AgentsDemo.Agents.AgentSubscriberSession do
   @doc """
   Add `conversation_id` to what this process is viewing.
 
-  `Coordinator` reads the viewer list to decide an idle agent may
-  *not* shut down yet, so an entry left on a conversation nobody is looking at
-  any more pins that agent for the full inactivity timeout. Every path that adds
-  one needs a path that gives it back.
+  `Coordinator` reads the viewer list to decide an idle agent may *not* shut
+  down yet, so an entry left on a conversation nobody is looking at any more
+  pins that agent for the full inactivity timeout. Every path that adds one
+  needs a path that gives it back.
 
   Adding does not release anything else. A host showing several conversations at
   once holds an entry per conversation, and the one it just opened says nothing
@@ -389,12 +402,7 @@ defmodule AgentsDemo.Agents.AgentSubscriberSession do
   def add_tracked_viewer(state, conversation_id, viewer_id) do
     %{
       tracked_viewers:
-        ViewerPresence.track(
-          tracked_viewers(state),
-          Coordinator,
-          conversation_id,
-          viewer_id
-        )
+        ViewerPresence.track(tracked_viewers(state), Coordinator, conversation_id, viewer_id)
     }
   end
 

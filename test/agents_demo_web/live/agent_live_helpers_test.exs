@@ -1054,9 +1054,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       end)
 
       Sagents.Subscriber
-      |> expect(:subscribe_to_agent, fn subs, agent_id ->
+      |> expect(:subscribe_to_agent, fn subs, agent_id, opts ->
         assert subs == %{}
         assert agent_id == "agent-123"
+        # Events arrive as {:agent, agent_id, event}. A stub written for the
+        # untagged arity does not fail here; Mimic falls through to the real
+        # function and the assertion below reports a subscription this test
+        # never made.
+        assert opts == [tagged: true]
         sample_subs
       end)
 

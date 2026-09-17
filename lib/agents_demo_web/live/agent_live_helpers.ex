@@ -21,9 +21,18 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
        Sagents.Subscriber.presence_topic())` so `presence_diff` broadcasts
        drive auto-resubscribe on agent migration.
 
-    2. In `handle_info/2`, route `{:DOWN, ref, :process, _, _}` and
-       `%Phoenix.Socket.Broadcast{event: "presence_diff"}` to
-       `handle_publisher_down/2` and `handle_presence_diff/2` here.
+    2. In `handle_info/2`, route agent events, `{:DOWN, ref, :process, _, _}`
+       and `%Phoenix.Socket.Broadcast{event: "presence_diff"}` here. Events
+       carry the agent id, so a socket that later shows more than one
+       conversation routes on it rather than reworking every clause:
+
+           def handle_info({:agent, _agent_id, {:status_changed, :running, nil}}, socket) do
+             {:noreply, AgentLiveHelpers.handle_status_running(socket)}
+           end
+
+           def handle_info({:DOWN, ref, :process, _, reason}, socket) do
+             {:noreply, AgentLiveHelpers.handle_publisher_down(socket, ref, reason)}
+           end
 
     3. For the action path (send_message, wake_agent, etc.), call
        `Coordinator.ensure_agent_session_running(socket.assigns,
@@ -54,7 +63,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   require Logger
 
   # Shown for `:registry_unavailable`, on every path that can hit it. See
-  # `flash_session_error/3` for why this condition gets its own copy.
+  # `flash_session_error/3` for why this condition gets its own copy. Reword it
+  # for your product; keep it separate from the other failures.
   @draining_message "This server is restarting. Please try that again in a moment."
 
   # ===========================================================================
@@ -199,14 +209,16 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
       do_load_conversation(socket, conversation_id, opts)
     else
       # This node's Sagents supervision tree is down: it is draining during a
-      # deploy, or has not finished booting. Reading the agent's status, waking
-      # it for a pending interrupt, and every action the loaded page offers all
-      # need the registry, so there is nothing worth rendering here.
+      # deploy, or has not finished booting. Reading the agent's status,
+      # subscribing, and waking it for a pending interrupt all need the
+      # registry, so there is nothing worth rendering here.
       #
-      # The guard is what keeps this from being a crash. `AgentServer.get_status/1`
-      # below reads as total — it catches exits and answers `:not_running` — but
-      # it raises `Sagents.RegistryUnavailableError` before reaching the call it
-      # guards, and a `catch :exit` clause does not catch a raise.
+      # The guard is what keeps this from being a crash.
+      # `AgentServer.get_status/1` below reads as total — it catches exits and
+      # answers `:not_running` — but it raises
+      # `Sagents.RegistryUnavailableError` before reaching the call it guards,
+      # and a `catch :exit` clause does not catch a raise. The `rescue` below
+      # does not catch it either.
       Logger.warning(
         "Refusing to load conversation #{inspect(conversation_id)}: " <>
           "this node is draining, its Sagents registry is unavailable"
@@ -311,20 +323,25 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
       assign(
         socket,
-        AgentSubscriberSession.add_tracked_viewer(
-          socket.assigns,
-          conversation_id,
-          user_id
-        )
+        AgentSubscriberSession.add_tracked_viewer(socket.assigns, conversation_id, user_id)
       )
     else
       socket
     end
   end
 
+  # Every event on this subscription arrives as `{:agent, agent_id, event}`.
+  # A socket showing one conversation could match the bare `{:agent, event}`
+  # instead; naming the source means a second subscription can be added later
+  # without reworking the clauses that already exist.
+  #
+  # `Coordinator` tags its session calls the same way. Both paths must agree:
+  # the publisher keeps one entry per {channel, pid}, so whichever subscribes
+  # last decides the envelope, and a tag on only one of them is an envelope
+  # that changes shape partway through a conversation.
   defp subscribe_to_agent(socket, agent_id) do
     subs = socket.assigns[:sagents_subs] || %{}
-    new_subs = Subscriber.subscribe_to_agent(subs, agent_id)
+    new_subs = Subscriber.subscribe_to_agent(subs, agent_id, tagged: true)
     assign(socket, :sagents_subs, new_subs)
   end
 
@@ -703,7 +720,9 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
   Exposed so tests can assert *which* message a path produced without
   hardcoding the string. A test that inlines the literal keeps passing after
-  someone rewords the copy, which is the moment it stops testing anything.
+  someone rewords the copy, which is the moment it stops testing anything. The
+  assertion worth writing is that the draining copy differs from the ordinary
+  failure copy, and it needs this to be expressible.
   """
   def draining_message, do: @draining_message
 
