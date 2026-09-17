@@ -712,21 +712,25 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
   `copy` carries two deliberately separate strings:
 
-    * `:log_label` — internal vocabulary, paired with the raw reason term.
-    * `:user_message` — product copy shown to the person. Never interpolate the
+    * `:log_label` - internal vocabulary, paired with the raw reason term.
+    * `:user_message` - product copy shown to the person. Never interpolate the
       reason into it. A live-but-wrong-state agent returns "Cannot resume,
       server is not interrupted": an internal string, and one that says "agent",
       a word many products deliberately never put in front of a user. This is a
       slot you are meant to edit and localize.
 
   `:registry_unavailable` is answered separately because it is not a failure of
-  the request. It means this node cannot host or route agent sessions — it is
-  draining during a deploy, or has not finished booting — while every other node
+  the request. It means this node cannot host or route agent sessions - it is
+  draining during a deploy, or has not finished booting - while another node
   serves the same request fine. "Try again" is literally the correct
   instruction, and after a deploy the reconnect lands on a node that works.
   Reporting it as a generic failure tells the user something is broken when
   nothing is, and logging it at `:error` fills the log with alarms for a routine
   deploy.
+
+  Route every session failure through here rather than adding a clause per call
+  site: the drain path is the one failure a healthy production system produces
+  routinely.
   """
   def flash_session_error(socket, reason, copy) do
     label = Keyword.fetch!(copy, :log_label)
