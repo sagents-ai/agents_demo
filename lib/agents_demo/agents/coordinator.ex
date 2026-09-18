@@ -20,8 +20,12 @@ defmodule AgentsDemo.Agents.Coordinator do
       subs =
         Sagents.Subscriber.subscribe_to_agent(
           subs,
-          AgentsDemo.Agents.Coordinator.conversation_agent_id(conversation_id)
+          AgentsDemo.Agents.Coordinator.conversation_agent_id(conversation_id),
+          tagged: true
         )
+
+  `tagged: true` makes every event arrive as `{:agent, agent_id, event}`
+  rather than `{:agent, event}`. See `@subscribe_opts` below.
 
   ### Action path (factory config required)
 
@@ -66,6 +70,16 @@ defmodule AgentsDemo.Agents.Coordinator do
 
   @presence_module AgentsDemoWeb.Presence
 
+  # How this application addresses agent events. `tagged: true` delivers every
+  # event as `{:agent, agent_id, event}` instead of `{:agent, event}`, so a
+  # process that grows a second subscription can tell the two apart.
+  #
+  # Every path that subscribes must pass this. A publisher keeps one entry per
+  # {channel, pid}, so whichever path subscribes last decides the envelope: a
+  # load path that tags and an action path that does not produce a conversation
+  # whose event shape changes the first time the user does something.
+  @subscribe_opts [tagged: true]
+
   @config %{
     factory_router: AgentsDemo.Agents.FactoryRouter,
     agent_persistence: AgentsDemo.Agents.AgentPersistence,
@@ -100,7 +114,12 @@ defmodule AgentsDemo.Agents.Coordinator do
       )
   """
   def ensure_agent_session_running(state, request_opts \\ []),
-    do: Sagents.Session.ensure_running(@config, state, request_opts: request_opts)
+    do:
+      Sagents.Session.ensure_running(
+        @config,
+        state,
+        [request_opts: request_opts] ++ @subscribe_opts
+      )
 
   @doc """
   Answer a pending interrupt, waking the agent first if it has gone to sleep.
@@ -119,7 +138,13 @@ defmodule AgentsDemo.Agents.Coordinator do
       )
   """
   def resume_agent_session(state, resume_data, request_opts \\ []),
-    do: Sagents.Session.resume(@config, state, resume_data, request_opts: request_opts)
+    do:
+      Sagents.Session.resume(
+        @config,
+        state,
+        resume_data,
+        [request_opts: request_opts] ++ @subscribe_opts
+      )
 
   @doc """
   Dismiss a terminal `:halt` interrupt, waking the agent first if it has gone
@@ -140,7 +165,12 @@ defmodule AgentsDemo.Agents.Coordinator do
       )
   """
   def dismiss_agent_session(state, request_opts \\ []),
-    do: Sagents.Session.dismiss(@config, state, request_opts: request_opts)
+    do:
+      Sagents.Session.dismiss(
+        @config,
+        state,
+        [request_opts: request_opts] ++ @subscribe_opts
+      )
 
   @doc """
   Stop an agent session for a conversation.
@@ -215,11 +245,10 @@ defmodule AgentsDemo.Agents.Coordinator do
   instead of waiting out its inactivity timeout.
 
   Hosts that keep session state should go through
-  `AgentSubscriberSession.add_tracked_viewer/3`, or
-  `sync_tracked_viewers/2`, rather than calling this directly, so the entries
-  the session records stay truthful about what Presence holds. Calling this
-  yourself is how a hand-rolled call site that tracks and never releases gets
-  added.
+  `AgentSubscriberSession.add_tracked_viewer/3`, or `sync_tracked_viewers/2`,
+  rather than calling this directly, so the entries the session records stay
+  truthful about what Presence holds. Calling this yourself is how a
+  hand-rolled call site that tracks and never releases gets added.
   """
   @impl Sagents.ViewerPresence
   def track_conversation_viewer(conversation_id, viewer_id, metadata \\ %{}) do

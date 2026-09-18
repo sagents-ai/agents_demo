@@ -465,19 +465,19 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:status_changed, :running, nil}}, socket) do
+  def handle_info({:agent, _agent_id, {:status_changed, :running, nil}}, socket) do
     Logger.info("Agent is running")
     {:noreply, AgentLiveHelpers.handle_status_running(socket)}
   end
 
   @impl true
-  def handle_info({:agent, {:status_changed, :idle, _data}}, socket) do
+  def handle_info({:agent, _agent_id, {:status_changed, :idle, _data}}, socket) do
     Logger.info("Agent returned to idle state (execution completed)")
     {:noreply, AgentLiveHelpers.handle_status_idle(socket)}
   end
 
   @impl true
-  def handle_info({:agent, {:status_changed, :cancelled, _data}}, socket) do
+  def handle_info({:agent, _agent_id, {:status_changed, :cancelled, _data}}, socket) do
     Logger.info("Agent execution was cancelled")
 
     {:noreply,
@@ -487,7 +487,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:status_changed, :interrupted, interrupt_data}}, socket) do
+  def handle_info({:agent, _agent_id, {:status_changed, :interrupted, interrupt_data}}, socket) do
     Logger.info("Agent execution interrupted - awaiting human response")
     Logger.debug("Interrupt data: #{inspect(interrupt_data)}")
 
@@ -495,19 +495,19 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:status_changed, :error, reason}}, socket) do
+  def handle_info({:agent, _agent_id, {:status_changed, :error, reason}}, socket) do
     Logger.error("Agent execution failed: #{inspect(reason)}")
     {:noreply, AgentLiveHelpers.handle_status_error(socket, reason)}
   end
 
   @impl true
-  def handle_info({:agent, {:todos_updated, todos}}, socket) do
+  def handle_info({:agent, _agent_id, {:todos_updated, todos}}, socket) do
     Logger.debug("TODOs updated: #{length(todos)} items")
     {:noreply, assign(socket, :todos, todos)}
   end
 
   @impl true
-  def handle_info({:agent, {:llm_deltas, deltas}}, socket) do
+  def handle_info({:agent, _agent_id, {:llm_deltas, deltas}}, socket) do
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_llm_deltas(deltas)
@@ -515,12 +515,12 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:llm_message, _message}}, socket) do
+  def handle_info({:agent, _agent_id, {:llm_message, _message}}, socket) do
     {:noreply, AgentLiveHelpers.handle_llm_message_complete(socket)}
   end
 
   @impl true
-  def handle_info({:agent, {:display_message_saved, display_msg}}, socket) do
+  def handle_info({:agent, _agent_id, {:display_message_saved, display_msg}}, socket) do
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_display_message_saved(display_msg)
@@ -528,14 +528,17 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:llm_token_usage, usage}}, socket) do
+  def handle_info({:agent, _agent_id, {:llm_token_usage, usage}}, socket) do
     # Optional: Display token usage stats
     Logger.debug("Token usage: #{inspect(usage)}")
     {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:agent, {:conversation_title_generated, new_title, agent_id}}, socket) do
+  def handle_info(
+        {:agent, _agent_id, {:conversation_title_generated, new_title, agent_id}},
+        socket
+      ) do
     Logger.info("Conversation title generated: #{new_title}")
 
     # Build page title from new title (application-specific UI concern)
@@ -564,12 +567,12 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:agent_shutdown, shutdown_data}}, socket) do
+  def handle_info({:agent, _agent_id, {:agent_shutdown, shutdown_data}}, socket) do
     {:noreply, AgentLiveHelpers.handle_agent_shutdown(socket, shutdown_data)}
   end
 
   @impl true
-  def handle_info({:agent, {:tool_call_identified, tool_info}}, socket) do
+  def handle_info({:agent, _agent_id, {:tool_call_identified, tool_info}}, socket) do
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_tool_call_identified(tool_info)
@@ -577,7 +580,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:tool_execution_update, status, tool_info}}, socket) do
+  def handle_info({:agent, _agent_id, {:tool_execution_update, status, tool_info}}, socket) do
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_tool_execution_update(status, tool_info)
@@ -585,7 +588,7 @@ defmodule AgentsDemoWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:agent, {:display_message_updated, updated_msg}}, socket) do
+  def handle_info({:agent, _agent_id, {:display_message_updated, updated_msg}}, socket) do
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_display_message_updated(updated_msg)
