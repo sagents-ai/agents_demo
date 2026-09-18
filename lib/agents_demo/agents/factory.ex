@@ -56,8 +56,8 @@ defmodule AgentsDemo.Agents.Factory do
   """
 
   alias LangChain.ChatModels.ChatAnthropic
-  # Uncomment for OpenAI:
-  alias LangChain.ChatModels.ChatOpenAI
+  # # Uncomment for OpenAI:
+  # alias LangChain.ChatModels.ChatOpenAI
   # Uncomment for Bedrock:
   # alias LangChain.Utils.BedrockConfig
   alias AgentsDemo.Agents.DemoSetup
@@ -151,50 +151,50 @@ defmodule AgentsDemo.Agents.Factory do
   # Modify this function to switch providers or models. Branch on `c` to
   # vary the model per request (e.g. agent kind, plan tier).
   defp build_model(%FactoryConfig{} = _c) do
-    # ChatAnthropic.new!(%{
-    #   model: @main_model,
-    #   api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
-    #   stream: true,
-    #   cache_control: %{"type" => "ephemeral"},
-    #   thinking: %{
-    #     type: "enabled",
-    #     budget_tokens: 3_000
-    #   }
-    # })
-
-    account_id = System.fetch_env!("CLOUDFLARE_ACCOUNT_ID")
-    api_key = System.fetch_env!("CLOUDFLARE_AI_API_TOKEN")
-    cloudflare_model = "@cf/zai-org/glm-5.3-flash"
-
-    ChatOpenAI.new!(%{
-      endpoint:
-        "https://api.cloudflare.com/client/v4/accounts/#{account_id}/ai/v1/chat/completions",
-      api_key: api_key,
-      model: cloudflare_model,
+    ChatAnthropic.new!(%{
+      model: @main_model,
+      api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
       stream: true,
-      temperature: 1,
-      # cache_control: %{"type" => "ephemeral"},
-      reasoning_mode: true,
-      reasoning_effort: "medium",
-      req_config: cloudflare_req_config()
+      cache_control: %{"type" => "ephemeral"},
+      thinking: %{
+        type: "enabled",
+        budget_tokens: 3_000
+      }
     })
+
+    # account_id = System.fetch_env!("CLOUDFLARE_ACCOUNT_ID")
+    # api_key = System.fetch_env!("CLOUDFLARE_AI_API_TOKEN")
+    # cloudflare_model = "@cf/zai-org/glm-5.3-flash"
+
+    # ChatOpenAI.new!(%{
+    #   endpoint:
+    #     "https://api.cloudflare.com/client/v4/accounts/#{account_id}/ai/v1/chat/completions",
+    #   api_key: api_key,
+    #   model: cloudflare_model,
+    #   stream: true,
+    #   temperature: 1,
+    #   # cache_control: %{"type" => "ephemeral"},
+    #   reasoning_mode: true,
+    #   reasoning_effort: "medium",
+    #   req_config: cloudflare_req_config()
+    # })
   end
 
-  # Extra Req options merged into every Cloudflare request.
-  #
-  # `req_config` is merged into the request just before it is sent, and Req
-  # merges header lists rather than replacing them, so these headers arrive
-  # alongside the `Authorization` and `api-key` headers the chat model sets.
-  #
-  # `cf-aig-gateway-id` routes the call through a named AI Gateway. Without it
-  # the request goes straight to Workers AI.
-  defp cloudflare_req_config do
-    case System.get_env("CLOUDFLARE_AI_GATEWAY_ID") do
-      nil -> %{}
-      "" -> %{}
-      gateway_id -> %{headers: [{"cf-aig-gateway-id", gateway_id}]}
-    end
-  end
+  # # Extra Req options merged into every Cloudflare request.
+  # #
+  # # `req_config` is merged into the request just before it is sent, and Req
+  # # merges header lists rather than replacing them, so these headers arrive
+  # # alongside the `Authorization` and `api-key` headers the chat model sets.
+  # #
+  # # `cf-aig-gateway-id` routes the call through a named AI Gateway. Without it
+  # # the request goes straight to Workers AI.
+  # defp cloudflare_req_config do
+  #   case System.get_env("CLOUDFLARE_AI_GATEWAY_ID") do
+  #     nil -> %{}
+  #     "" -> %{}
+  #     gateway_id -> %{headers: [{"cf-aig-gateway-id", gateway_id}]}
+  #   end
+  # end
 
   defp get_fallback_models(%FactoryConfig{} = _c) do
     []
@@ -209,25 +209,25 @@ defmodule AgentsDemo.Agents.Factory do
   # ---------------------------------------------------------------------------
 
   defp get_title_model(%FactoryConfig{} = _c) do
-    # ChatAnthropic.new!(%{
-    #   model: @title_model,
-    #   api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
-    #   temperature: 1,
-    #   stream: false
-    # })
-
-    account_id = System.fetch_env!("CLOUDFLARE_ACCOUNT_ID")
-
-    ChatOpenAI.new!(%{
-      endpoint:
-        "https://api.cloudflare.com/client/v4/accounts/#{account_id}/ai/v1/chat/completions",
-      model: "@cf/zai-org/glm-5.3-flash",
-      api_key: System.fetch_env!("CLOUDFLARE_AI_API_TOKEN"),
-      stream: false,
+    ChatAnthropic.new!(%{
+      model: @title_model,
+      api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
       temperature: 1,
-      reasoning_effort: "none",
-      req_config: cloudflare_req_config()
+      stream: false
     })
+
+    # account_id = System.fetch_env!("CLOUDFLARE_ACCOUNT_ID")
+
+    # ChatOpenAI.new!(%{
+    #   endpoint:
+    #     "https://api.cloudflare.com/client/v4/accounts/#{account_id}/ai/v1/chat/completions",
+    #   model: "@cf/zai-org/glm-5.3-flash",
+    #   api_key: System.fetch_env!("CLOUDFLARE_AI_API_TOKEN"),
+    #   stream: false,
+    #   temperature: 1,
+    #   reasoning_effort: "none",
+    #   req_config: cloudflare_req_config()
+    # })
   end
 
   defp get_title_fallbacks(%FactoryConfig{} = _c), do: []

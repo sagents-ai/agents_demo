@@ -43,7 +43,7 @@ defmodule AgentsDemo.MixProject do
       {:bcrypt_elixir, "~> 3.0"},
       # {:langchain, "~> 0.7.0"},
       # {:langchain, path: "../my_langchain", override: true},
-      {:sagents, "~> 0.15.0"},
+      {:sagents, "~> 0.15.1"},
       # {:sagents, path: "../sagents", override: true},
       # {:sagents_live_debugger, path: "../sagents_live_debugger"},
       {:sagents_live_debugger, "~> 0.6.0"},
