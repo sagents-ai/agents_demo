@@ -661,6 +661,18 @@ defmodule AgentsDemoWeb.ChatComponents do
   # One clause per `content_type` a DisplayMessage carries. The last clause is
   # the catch-all: a row whose type has no dedicated renderer shows its `text`,
   # which is what plain user and assistant messages want.
+  #
+  # Narration comes first, ahead of the type clauses. It is the model saying
+  # what it is about to do rather than answering, which is a status line and
+  # not a reply, and that is true of it whether it arrived as text or as a
+  # thinking block. Rendering it as a bubble presents working notes as an
+  # answer; hiding it leaves the reader watching a spinner with no explanation.
+  defp message_body(%{message: %{content: %{"utterance" => "narration"}}} = assigns) do
+    ~H"""
+    <.narration_display content_text={get_in(@message.content, ["text"]) || ""} />
+    """
+  end
+
   defp message_body(%{message: %{content_type: "thinking"}} = assigns) do
     ~H"""
     <.thinking_display
@@ -762,6 +774,48 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   defp stop_reason_text("content_filtered", _details), do: "Response declined"
   defp stop_reason_text(_reason, _details), do: "Response stopped"
+
+  # The text parts of a streaming delta, in order, each with its own marker.
+  # Empty parts are dropped: the index-based merge pads around a position it
+  # has not filled yet, so a nil entry means "nothing here", not "blank text".
+  defp streaming_text_parts(%MessageDelta{merged_content: parts}) when is_list(parts) do
+    for %ContentPart{type: :text} = part <- parts,
+        is_binary(part.content) and part.content != "" do
+      {ContentPart.utterance(part), part.content}
+    end
+  end
+
+  defp streaming_text_parts(_delta), do: []
+
+  attr :content_text, :string, required: true
+
+  # Component: Narration (status line, not a chat bubble)
+  #
+  # Reads as the model talking about the work rather than delivering it, so it
+  # sits flush in the transcript with a rule down its left edge instead of the
+  # surface a reply gets. It introduces whatever follows, usually a tool card.
+  #
+  # `data-utterance` is on the wrapper so a test can find the row by what it is
+  # rather than by how it happens to be styled.
+  defp narration_display(%{content_text: ""} = assigns), do: ~H""
+
+  defp narration_display(assigns) do
+    ~H"""
+    <div
+      class="px-4 py-1 flex items-start gap-2 border-l-2 border-[var(--color-border)] ml-4"
+      data-utterance="narration"
+    >
+      <.icon
+        name="hero-chevron-double-right"
+        class="w-3.5 h-3.5 mt-1 shrink-0 text-[var(--color-text-secondary)]"
+      />
+      <.markdown
+        text={@content_text}
+        class="prose-sm text-[var(--color-text-secondary)] [&_*]:text-[var(--color-text-secondary)]"
+      />
+    </div>
+    """
+  end
 
   # Component: Text Message (normal message display)
   defp text_message(assigns) do
@@ -1259,7 +1313,12 @@ defmodule AgentsDemoWeb.ChatComponents do
           []
       end
 
-    # Convert merged_content to string for display
+    # Each text part is kept apart rather than joined, because a response can
+    # hold narration and then the reply, and the two render differently. The
+    # marker is on the part from its first token, so narration reads as
+    # narration while it is still arriving.
+    text_parts = streaming_text_parts(assigns.streaming_delta)
+
     assigns =
       assigns
       |> assign(:tool_calls, tool_calls)
@@ -1267,10 +1326,8 @@ defmodule AgentsDemoWeb.ChatComponents do
         :thinking,
         MessageDelta.content_to_string(assigns.streaming_delta, :thinking)
       )
-      |> assign(
-        :content,
-        MessageDelta.content_to_string(assigns.streaming_delta, :text) || ""
-      )
+      |> assign(:text_parts, text_parts)
+      |> assign(:last_text_index, length(text_parts) - 1)
 
     ~H"""
     <div class="flex flex-col gap-4">
@@ -1281,20 +1338,26 @@ defmodule AgentsDemoWeb.ChatComponents do
         streaming={true}
       />
 
-      <%!-- Text content as its own block, matching saved text_message layout --%>
-      <%= if @content != "" do %>
-        <div class="px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
-          <.markdown text={@content} streaming={true} />
-          <span
-            :if={@tool_calls == []}
-            class="ml-1 inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"
-          >
-          </span>
-        </div>
+      <%!-- Text content as its own block, matching saved text_message layout.
+      Narration renders the way a saved narration row does, so a message does
+      not change shape when the run finishes and the page reloads it. --%>
+      <%= for {{utterance, text}, index} <- Enum.with_index(@text_parts) do %>
+        <%= if utterance == "narration" do %>
+          <.narration_display content_text={text} />
+        <% else %>
+          <div class="px-4 py-1.5 rounded-lg text-[var(--color-text-primary)] leading-relaxed bg-[var(--color-surface)]">
+            <.markdown text={text} streaming={true} />
+            <span
+              :if={@tool_calls == [] && index == @last_text_index}
+              class="ml-1 inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"
+            >
+            </span>
+          </div>
+        <% end %>
       <% end %>
 
       <%!-- Cursor when no content yet --%>
-      <%= if @content == "" && @tool_calls == [] do %>
+      <%= if @text_parts == [] && @tool_calls == [] do %>
         <div class="px-4 py-1.5">
           <span class="inline-block w-2 h-4 bg-[var(--color-primary)] animate-pulse"></span>
         </div>
@@ -1849,7 +1912,7 @@ defmodule AgentsDemoWeb.ChatComponents do
 
   defp mdex_config(md_content, streaming?) do
     [
-      streaming: streaming?,
+      auto_close: streaming?,
       markdown: md_content,
       extension: [
         strikethrough: true,

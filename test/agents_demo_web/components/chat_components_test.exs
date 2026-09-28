@@ -409,4 +409,118 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
       assert html =~ "50%"
     end
   end
+
+  describe "narration rendering" do
+    alias LangChain.Message
+    alias Sagents.Message.DisplayHelpers
+
+    defp render_row(content_type, content) do
+      render_component(&ChatComponents.message/1, %{
+        message: %{
+          id: 7,
+          message_type: "assistant",
+          content_type: content_type,
+          content: content
+        }
+      })
+    end
+
+    # query/2 rather than filter/2, for the reason noted on `note_nodes/2`.
+    defp narration_nodes(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("[data-utterance='narration']")
+      |> Enum.to_list()
+    end
+
+    test "a narration row renders as a status line, not a bubble" do
+      html = render_row("text", %{"text" => "Checking the logs.", "utterance" => "narration"})
+
+      assert [_node] = narration_nodes(html)
+      assert html =~ "Checking the logs."
+      # The surface a reply sits on is what makes it read as a reply.
+      refute html =~ "bg-[var(--color-surface)]"
+    end
+
+    test "an answer row renders as an ordinary reply" do
+      html = render_row("text", %{"text" => "Out of memory.", "utterance" => "answer"})
+
+      assert narration_nodes(html) == []
+      assert html =~ "bg-[var(--color-surface)]"
+    end
+
+    test "an unlabelled row is unaffected" do
+      html = render_row("text", %{"text" => "Plain reply."})
+
+      assert narration_nodes(html) == []
+      assert html =~ "bg-[var(--color-surface)]"
+    end
+
+    test "narration carried on a thinking part is a status line too" do
+      # A progress update arrives as a thinking block rather than as text. It
+      # is the same kind of utterance, so it gets the same treatment instead of
+      # the collapsed reasoning block.
+      html =
+        render_row("thinking", %{"text" => "Reading the events next.", "utterance" => "narration"})
+
+      assert [_node] = narration_nodes(html)
+      assert html =~ "Reading the events next."
+    end
+
+    test "the rows a narration message produces render as written" do
+      # End to end through the framework: the marker the adapter set, projected
+      # by DisplayHelpers into the content map a host stores, rendered from it.
+      message =
+        Message.new_assistant!(%{
+          content: [
+            ContentPart.narration!("Checking the deployment first."),
+            ContentPart.answer!("The image tag does not exist.")
+          ]
+        })
+
+      [narration_item, answer_item] = DisplayHelpers.extract_display_items(message)
+
+      narration_html =
+        render_row(Atom.to_string(narration_item.type), narration_item.content)
+
+      answer_html = render_row(Atom.to_string(answer_item.type), answer_item.content)
+
+      assert [_node] = narration_nodes(narration_html)
+      assert narration_html =~ "Checking the deployment first."
+
+      assert narration_nodes(answer_html) == []
+      assert answer_html =~ "The image tag does not exist."
+    end
+
+    test "a streaming delta splits narration from the reply as it arrives" do
+      # The saved rows and the in-flight buffer must agree, or a message
+      # changes shape the moment the run finishes and the page reloads it.
+      html =
+        render_component(
+          &ChatComponents.streaming_message/1,
+          delta([
+            ContentPart.narration!("Checking the deployment first."),
+            ContentPart.answer!("The image tag does not exist.")
+          ])
+        )
+
+      assert [_node] = narration_nodes(html)
+      assert html =~ "Checking the deployment first."
+      assert html =~ "The image tag does not exist."
+      # The reply still gets its surface; only the narration lost it.
+      assert html =~ "bg-[var(--color-surface)]"
+    end
+
+    test "an unlabelled streaming delta still renders one bubble" do
+      html =
+        render_component(
+          &ChatComponents.streaming_message/1,
+          delta([ContentPart.text!("Just a reply.")])
+        )
+
+      assert narration_nodes(html) == []
+      assert html =~ "Just a reply."
+      assert html =~ "bg-[var(--color-surface)]"
+    end
+  end
 end
