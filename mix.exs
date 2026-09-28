@@ -76,8 +76,14 @@ defmodule AgentsDemo.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:horde, "~> 0.10.0"},
       {:bandit, "~> 1.5"},
-      {:mdex, "~> 0.13"},
-      {:lumis, "~> 0.1"},
+      {:mdex, "~> 0.14"},
+      {:lumis, "~> 0.9"},
+      # Lumis highlights only the languages whose parsers are installed, and a
+      # fence in any other language renders as plain text. Model replies can
+      # contain code in almost anything, so these bundles cover the common web
+      # and backend languages rather than a hand-picked list.
+      {:lumis_wasm_bundle_web, "~> 0.1"},
+      {:lumis_wasm_bundle_backend, "~> 0.1"},
       {:tidewave, "~> 0.5", only: :dev},
       {:dotenvy, "~> 1.1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}

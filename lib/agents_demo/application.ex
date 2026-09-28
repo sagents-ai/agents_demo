@@ -8,6 +8,11 @@ defmodule AgentsDemo.Application do
 
   @impl true
   def start(_type, _args) do
+    # Lumis compiles a parser the first time a document needs it. Warming the
+    # languages replies most often contain moves that compile off the first
+    # chat message. It runs in the background and cannot fail the boot.
+    Lumis.Languages.async_load(~w(elixir json javascript python bash))
+
     children = [
       AgentsDemoWeb.Telemetry,
       AgentsDemo.Repo,
