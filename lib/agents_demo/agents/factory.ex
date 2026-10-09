@@ -262,6 +262,12 @@ defmodule AgentsDemo.Agents.Factory do
   #   - `true` - Enable with default decisions (approve, edit, reject)
   #   - `false` - No interruption for this tool
   #   - `%{allowed_decisions: [:approve, :reject]}` - Custom decisions
+  #   - `%{recovery: :reexecute}` - What the next boot does with an approved
+  #     call that started but whose result was never persisted (the agent
+  #     stopped mid-tool). The default, `:report_unknown`, gives the model an
+  #     error result saying the outcome is unknown and should be checked.
+  #     `:reexecute` re-runs it, so use it only for tools that are safe to
+  #     repeat, such as ones idempotent by `context.tool_call_id`.
   defp default_interrupt_on(%FactoryConfig{} = _c) do
     %{
       "delete_file" => true

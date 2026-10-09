@@ -489,8 +489,8 @@ defmodule AgentsDemoWeb.ChatComponents do
                 phx-update="stream"
                 class="flex flex-col gap-4"
               >
-                <div :for={{id, message} <- @streams.messages} id={id} class="hidden has-[>*]:block">
-                  <.message message={message} debug_mode={@debug_mode} />
+                <div :for={{id, group} <- @streams.messages} id={id}>
+                  <.user_request_group group={group} debug_mode={@debug_mode} />
                 </div>
               </div>
             <% end %>
@@ -628,6 +628,67 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
+  attr :group, :map, required: true, doc: "A group from AgentsDemoWeb.UserRequestGroups"
+  attr :debug_mode, :boolean, default: false
+
+  # One user request, its rows in display order: the opening message, the work
+  # done for it, and the final answer onward. A finished user request folds its
+  # work away; one still running, or one with no recorded completion, shows
+  # everything.
+  def user_request_group(assigns) do
+    ~H"""
+    <div class="flex flex-col gap-4">
+      <div :for={row <- @group.opening_rows} class="hidden has-[>*]:block">
+        <.message message={row} debug_mode={@debug_mode} />
+      </div>
+
+      <%= if @group.user_request && @group.work_rows != [] do %>
+        <details
+          id={"#{@group.id}-work"}
+          class="group/work"
+        >
+          <summary class="flex cursor-pointer select-none list-none items-center gap-2 pr-3 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] [&::-webkit-details-marker]:hidden">
+            <.icon
+              name="hero-chevron-right"
+              class="w-4 h-4 transition-transform duration-200 group-open/work:rotate-90"
+            />
+            <span>{work_label(@group)}</span>
+          </summary>
+          <div class="flex flex-col gap-4 pr-3 pb-3">
+            <div :for={row <- @group.work_rows} class="hidden has-[>*]:block">
+              <.message message={row} debug_mode={@debug_mode} />
+            </div>
+          </div>
+        </details>
+      <% else %>
+        <div :for={row <- @group.work_rows} class="hidden has-[>*]:block">
+          <.message message={row} debug_mode={@debug_mode} />
+        </div>
+      <% end %>
+
+      <div :for={row <- @group.closing_rows} class="hidden has-[>*]:block">
+        <.message message={row} debug_mode={@debug_mode} />
+      </div>
+    </div>
+    """
+  end
+
+  defp work_label(%{user_request: %{status: "cancelled"}} = group),
+    do: "Stopped after " <> worked_for(group)
+
+  defp work_label(%{user_request: %{status: "error"}} = group),
+    do: "Failed after " <> worked_for(group)
+
+  defp work_label(group), do: "Worked for " <> worked_for(group)
+
+  defp worked_for(%{
+         started_at: %DateTime{} = started,
+         user_request: %{completed_at: %DateTime{} = done}
+       }),
+       do: AgentsDemoWeb.UserRequestGroups.duration_label(started, done)
+
+  defp worked_for(_group), do: "a moment"
+
   attr :message, :any, required: true, doc: "A DisplayMessage struct"
   attr :debug_mode, :boolean, default: false
 
@@ -635,6 +696,7 @@ defmodule AgentsDemoWeb.ChatComponents do
   # Expects a DisplayMessage struct
   def message(assigns) do
     ~H"""
+    <.user_request_tag :if={@debug_mode} message={@message} />
     <.message_body message={@message} debug_mode={@debug_mode} />
 
     <%!-- Sibling of the message body, never nested inside it. A thinking block
@@ -650,6 +712,30 @@ defmodule AgentsDemoWeb.ChatComponents do
       reason={get_in(@message.content, ["stop_reason"])}
       details={get_in(@message.content, ["stop_details"])}
     />
+    """
+  end
+
+  attr :message, :any, required: true
+
+  # Debug-only: the user request a row belongs to, and whether it is part of
+  # that request's final answer. Rows written before user requests were
+  # tracked have no number.
+  defp user_request_tag(assigns) do
+    ~H"""
+    <div
+      id={"user-request-tag-#{@message.id}"}
+      class="mb-1 flex items-center gap-1.5 font-mono text-[11px] text-purple-600 dark:text-purple-400"
+    >
+      <span>
+        {if @message.user_request_seq, do: "request ##{@message.user_request_seq}", else: "no request"}
+      </span>
+      <span
+        :if={@message.user_request_final}
+        class="rounded bg-purple-100 px-1 font-semibold dark:bg-purple-900/40"
+      >
+        final
+      </span>
+    </div>
     """
   end
 

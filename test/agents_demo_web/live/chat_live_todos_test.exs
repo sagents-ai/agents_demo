@@ -33,14 +33,19 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
     %{user: user, conn: log_in_user(build_conn(), user)}
   end
 
+  # A run settles on :idle or :error, and both clear `loading`. Submitting sets
+  # `loading` before the agent's :running status arrives, so requiring it to be
+  # clear keeps a wait for a settled status from matching the status left over
+  # from the previous run.
   defp wait_for_agent_status(view, expected_status, timeout) do
     deadline = System.monotonic_time(:millisecond) + timeout
+    settled? = expected_status in [:idle, :error]
 
     Stream.repeatedly(fn ->
       socket_assigns = :sys.get_state(view.pid).socket.assigns
       current_status = socket_assigns[:agent_status]
 
-      if current_status == expected_status do
+      if current_status == expected_status and not (settled? and socket_assigns[:loading]) do
         {:ok, socket_assigns}
       else
         if System.monotonic_time(:millisecond) > deadline do
@@ -267,7 +272,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       submit_message(view, "Create two tasks")
 
       # Wait for agent completion
-      {:ok, assigns} = wait_for_agent_status(view, :idle, 100)
+      {:ok, assigns} = wait_for_agent_status(view, :idle, 2000)
 
       # Verify TODOs are present
       assert length(assigns[:todos]) == 2
@@ -368,7 +373,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       end)
 
       submit_message(view, "Create initial tasks")
-      {:ok, assigns} = wait_for_agent_status(view, :idle, 100)
+      {:ok, assigns} = wait_for_agent_status(view, :idle, 2000)
       assert length(assigns[:todos]) == 2
 
       # Second message: Update TODOs
@@ -404,7 +409,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       end)
 
       submit_message(view, "Mark first task complete")
-      {:ok, updated_assigns} = wait_for_agent_status(view, :idle, 100)
+      {:ok, updated_assigns} = wait_for_agent_status(view, :idle, 2000)
 
       # Verify first task is now completed
       todos = updated_assigns[:todos]
@@ -449,7 +454,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       end)
 
       submit_message(view, "Create a task")
-      {:ok, assigns} = wait_for_agent_status(view, :idle, 100)
+      {:ok, assigns} = wait_for_agent_status(view, :idle, 2000)
       assert length(assigns[:todos]) == 1
 
       # Second: simulate LLM error
@@ -460,7 +465,7 @@ defmodule AgentsDemoWeb.ChatLiveTodosTest do
       submit_message(view, "This will fail")
 
       # Wait for error state
-      case wait_for_agent_status(view, :error, 100) do
+      case wait_for_agent_status(view, :error, 2000) do
         {:ok, error_assigns} ->
           # Verify TODOs are still present despite the error
           assert length(error_assigns[:todos]) == 1

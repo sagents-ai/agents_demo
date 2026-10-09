@@ -4,8 +4,8 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
   Each function takes a `socket`, calls the equivalent host-agnostic
   function on `AgentSubscriberSession`, and applies the resulting
-  changes via `assign/2`. LiveView-specific concerns — streams (`stream/3`,
-  `stream_insert/3`), flash messages, `connected?` gates, and orchestrating
+  changes via `assign/2`. LiveView-specific concerns — streams (`stream/3`),
+  flash messages, `connected?` gates, and orchestrating
   resume calls with their flash side effects — live here.
 
   Non-LiveView consumers (a GraphQL bridge GenServer, etc.) should bypass
@@ -51,12 +51,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   - `Sagents.Subscriber` - Subscription bookkeeping
   """
 
-  import Phoenix.LiveView, only: [stream: 4, stream_insert: 3, put_flash: 3, connected?: 1]
+  import Phoenix.LiveView, only: [stream: 4, put_flash: 3, connected?: 1]
   import Phoenix.Component, only: [assign: 2, assign: 3]
 
   alias AgentsDemo.Conversations
   alias AgentsDemo.Agents.Coordinator
   alias AgentsDemo.Agents.AgentSubscriberSession
+  alias AgentsDemoWeb.UserRequestGroups
   alias Sagents.AgentServer
   alias Sagents.Subscriber
 
@@ -66,6 +67,11 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   # `flash_session_error/3` for why this condition gets its own copy. Reword it
   # for your product; keep it separate from the other failures.
   @draining_message "This server is restarting. Please try that again in a moment."
+
+  # Shown for `{:outcome_unknown, _}`: the agent took the request and then
+  # failed, so the request may already be in effect. It must never invite a
+  # retry. See `flash_session_error/3`.
+  @outcome_unknown_message "We could not confirm that went through. It may still be in progress."
 
   # ===========================================================================
   # State init / reset
@@ -245,6 +251,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
 
       display_messages = conversations.load_display_messages(scope, conversation_id)
       has_messages = !Enum.empty?(display_messages)
+
+      groups =
+        UserRequestGroups.build(
+          display_messages,
+          conversations.user_requests_by_seq(scope, conversation_id)
+        )
+
       saved_todos = conversations.load_todos(scope, conversation_id)
 
       agent_status = AgentServer.get_status(agent_id)
@@ -254,7 +267,7 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
         |> assign(:todos, saved_todos)
         |> assign(:agent_status, agent_status)
         |> assign(:agent_alive?, agent_status != :not_running)
-        |> stream(:messages, display_messages, reset: true)
+        |> stream(:messages, groups, reset: true)
         |> assign(:has_messages, has_messages)
 
       socket =
@@ -414,34 +427,33 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
     do: assign(socket, AgentSubscriberSession.handle_llm_message_complete())
 
   @doc """
-  Display message saved — reload from DB and stream-reset (or fall back to
-  `stream_insert/3` if there's no conversation context yet).
+  Display message saved: reload from DB and stream-reset. The stream holds
+  user request groups, and a row belongs inside its group, so the groups are
+  rebuilt rather than the row inserted.
   """
-  def handle_display_message_saved(socket, display_msg) do
-    socket =
-      if socket.assigns[:conversation_id] && socket.assigns[:current_scope] do
-        socket
-        |> assign(:streaming_delta, nil)
-        |> reload_messages_from_db()
-      else
-        stream_insert(socket, :messages, display_msg)
-      end
-
-    assign(socket, :has_messages, true)
+  def handle_display_message_saved(socket, _display_msg) do
+    socket
+    |> assign(:streaming_delta, nil)
+    |> reload_messages_from_db()
+    |> assign(:has_messages, true)
   end
 
   @doc """
-  Reload display messages from the database and stream-reset.
+  Reload display messages from the database, group them by user request, and
+  stream-reset.
   """
   def reload_messages_from_db(socket) do
     if socket.assigns[:conversation_id] && socket.assigns[:current_scope] do
-      messages =
-        Conversations.load_display_messages(
-          socket.assigns.current_scope,
-          socket.assigns.conversation_id
+      scope = socket.assigns.current_scope
+      conversation_id = socket.assigns.conversation_id
+
+      groups =
+        UserRequestGroups.build(
+          Conversations.load_display_messages(scope, conversation_id),
+          Conversations.user_requests_by_seq(scope, conversation_id)
         )
 
-      stream(socket, :messages, messages, reset: true)
+      stream(socket, :messages, groups, reset: true)
     else
       socket
     end
@@ -503,9 +515,18 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
     )
   end
 
-  @doc "Display message updated — stream the new version."
-  def handle_display_message_updated(socket, updated_msg),
-    do: stream_insert(socket, :messages, updated_msg)
+  @doc """
+  Display message updated: reload, since the row lives inside its
+  user request's group.
+  """
+  def handle_display_message_updated(socket, _updated_msg),
+    do: reload_messages_from_db(socket)
+
+  @doc """
+  User request completed: reload so the finished user request folds its work
+  away behind its final answer.
+  """
+  def handle_user_request_completed(socket, _report), do: reload_messages_from_db(socket)
 
   # ===========================================================================
   # Lifecycle handlers
@@ -727,6 +748,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   def draining_message, do: @draining_message
 
   @doc """
+  The copy shown when the agent took a request and then failed before
+  confirming it.
+
+  Exposed for the same reason as `draining_message/0`.
+  """
+  def outcome_unknown_message, do: @outcome_unknown_message
+
+  @doc """
   Log a failed session action and flash product copy describing it.
 
   `copy` carries two deliberately separate strings:
@@ -747,6 +776,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
   nothing is, and logging it at `:error` fills the log with alarms for a routine
   deploy.
 
+  `{:outcome_unknown, reason}` is answered separately for the opposite reason.
+  The agent took the request and then failed while handling it: it crashed,
+  the call timed out, or its node went away. The request may already be in
+  effect, and after an approved HITL decision the tool may be running, so the
+  caller's "please try again" copy is wrong here. The agent broadcasts its true
+  status when it comes back, and the ordinary status handling settles the UI.
+
   Route every session failure through here rather than adding a clause per call
   site: the drain path is the one failure a healthy production system produces
   routinely.
@@ -758,6 +794,12 @@ defmodule AgentsDemoWeb.AgentLiveHelpers do
       :registry_unavailable ->
         Logger.warning("#{label}: this node is draining, its Sagents registry is unavailable")
         put_flash(socket, :error, @draining_message)
+
+      # The agent took the request and then failed. It may be in effect, so
+      # never suggest repeating it. The agent's next status event settles the UI.
+      {:outcome_unknown, _detail} = other ->
+        Logger.error("#{label}: #{inspect(other)}")
+        put_flash(socket, :error, @outcome_unknown_message)
 
       other ->
         Logger.error("#{label}: #{inspect(other)}")

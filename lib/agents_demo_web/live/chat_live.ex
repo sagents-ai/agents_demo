@@ -179,8 +179,11 @@ defmodule AgentsDemoWeb.ChatLive do
         {:noreply, socket}
 
       {:error, reason} ->
-        Logger.error("Failed to cancel agent: #{inspect(reason)}")
-        {:noreply, put_flash(socket, :error, "Failed to cancel agent: #{inspect(reason)}")}
+        {:noreply,
+         AgentLiveHelpers.flash_session_error(socket, reason,
+           log_label: "failed to cancel agent",
+           user_message: "That could not be stopped. Please try again."
+         )}
     end
   end
 
@@ -426,24 +429,9 @@ defmodule AgentsDemoWeb.ChatLive do
 
     socket = assign(socket, :debug_mode, new_debug_mode)
 
-    # Re-render all existing messages with the new debug mode
-    # We need to reload them from the database to force a re-render
-    socket =
-      if socket.assigns.conversation_id do
-        stream(
-          socket,
-          :messages,
-          AgentsDemo.Conversations.load_display_messages(
-            socket.assigns.current_scope,
-            socket.assigns.conversation_id
-          ),
-          reset: true
-        )
-      else
-        socket
-      end
-
-    {:noreply, socket}
+    # Stream items are not re-rendered when an assign changes, so the
+    # transcript is reloaded to render it in the new mode.
+    {:noreply, AgentLiveHelpers.reload_messages_from_db(socket)}
   end
 
   @impl true
@@ -593,6 +581,18 @@ defmodule AgentsDemoWeb.ChatLive do
      socket
      |> AgentLiveHelpers.handle_display_message_updated(updated_msg)
      |> push_event("scroll-to-bottom", %{})}
+  end
+
+  # Sent before the :idle status change, so the finished user request folds
+  # its work away in the same render that re-enables the input.
+  @impl true
+  def handle_info({:agent, _agent_id, {:user_request_completed, report}}, socket) do
+    {:noreply, AgentLiveHelpers.handle_user_request_completed(socket, report)}
+  end
+
+  @impl true
+  def handle_info({:agent, _agent_id, {:user_request_started, _info}}, socket) do
+    {:noreply, socket}
   end
 
   @impl true

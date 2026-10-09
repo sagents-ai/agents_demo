@@ -20,6 +20,10 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
     Mimic.copy(Sagents.AgentServer)
     Mimic.copy(Sagents.FileSystemServer)
     Mimic.copy(Sagents.Subscriber)
+
+    # The message stream holds user request groups, built from the rows and the
+    # recorded user requests. Tests that stub the rows get no user requests.
+    stub(AgentsDemo.Conversations, :user_requests_by_seq, fn _scope, _conversation_id -> %{} end)
     :ok
   end
 
@@ -334,14 +338,13 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       assert result.assigns.has_messages == true
     end
 
-    test "inserts message directly when no conversation_id" do
+    test "without a conversation there is nothing to reload" do
       socket = new_socket(%{}, [:messages])
-      message = %{id: 1, content: "Test"}
 
-      result = AgentLiveHelpers.handle_display_message_saved(socket, message)
+      Conversations |> reject(:load_display_messages, 2)
 
-      # Message should be in stream (we can't easily assert on stream contents,
-      # but we can verify the socket was returned and has_messages is set)
+      result = AgentLiveHelpers.handle_display_message_saved(socket, %{id: 1, content: "Test"})
+
       assert result.assigns.has_messages == true
     end
   end
@@ -502,12 +505,14 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
   end
 
   describe "handle_display_message_updated/2" do
-    test "inserts updated message into stream" do
-      socket = new_socket(%{}, [:messages])
+    test "reloads the groups, since the row lives inside one" do
+      scope = %AgentsDemo.Accounts.Scope{user: %{id: 1}}
+      socket = new_socket(%{conversation_id: 123, current_scope: scope}, [:messages])
 
-      updated_msg = %{id: 1, status: :executing}
+      Conversations
+      |> expect(:load_display_messages, fn ^scope, 123 -> [] end)
 
-      result = AgentLiveHelpers.handle_display_message_updated(socket, updated_msg)
+      result = AgentLiveHelpers.handle_display_message_updated(socket, %{id: 1})
       assert result != nil
     end
   end
@@ -1363,6 +1368,17 @@ defmodule AgentsDemoWeb.AgentLiveHelpersTest do
       other = AgentLiveHelpers.flash_session_error(new_socket(), :boom, @copy)
 
       refute draining.assigns.flash["error"] == other.assigns.flash["error"]
+    end
+
+    test "shows non-retry copy when the outcome is unknown" do
+      # The agent took the request and then failed, so it may be in effect.
+      # The caller's "try again" copy would invite a duplicate.
+      result =
+        AgentLiveHelpers.flash_session_error(new_socket(), {:outcome_unknown, :killed}, @copy)
+
+      assert result.assigns.flash["error"] == AgentLiveHelpers.outcome_unknown_message()
+      refute result.assigns.flash["error"] == "That could not be saved."
+      refute result.assigns.flash["error"] =~ "killed"
     end
 
     test "never puts the raw reason term in front of the user" do
