@@ -82,7 +82,7 @@ AgentServer.add_message(session.agent_id, message)
 def create_demo_agent(opts) do
   Agent.new!(%{
     agent_id: agent_id,
-    model: ChatAnthropic.new!(model: "claude-sonnet-4-5-20250929"),
+    model: ChatAnthropic.new!(model: "claude-sonnet-5-5"),
     middleware: [
       TodoList,              # Task management per conversation
       FileSystem,            # Virtual filesystem per conversation

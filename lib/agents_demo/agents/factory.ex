@@ -58,12 +58,19 @@ defmodule AgentsDemo.Agents.Factory do
   alias LangChain.ChatModels.ChatAnthropic
   # # Uncomment for OpenAI:
   # alias LangChain.ChatModels.ChatOpenAI
+  # # Uncomment for Cloudflare Workers AI or another OpenAI-compatible service:
+  # alias LangChain.ChatModels.ChatOpenAICompatible
   # Uncomment for Bedrock:
   # alias LangChain.Utils.BedrockConfig
   alias AgentsDemo.Agents.DemoSetup
   alias AgentsDemo.Middleware.InjectCurrentTime
+  alias AgentsDemo.Middleware.KungFooMiddleware
+  alias AgentsDemo.Middleware.PirateMiddleware
   alias AgentsDemo.Middleware.WebToolMiddleware
+  alias AgentsDemo.Agents.ModeAnnouncer
+  alias Sagents.AbilitySet
   alias Sagents.Agent
+  alias Sagents.Middleware.AbilitySetSwitcher
   alias Sagents.Middleware.ConversationTitle
   alias Sagents.Middleware.HumanInTheLoop
   alias AgentsDemo.Agents.FactoryConfig
@@ -80,7 +87,7 @@ defmodule AgentsDemo.Agents.Factory do
 
   # Title generation uses a lighter/faster model for cost efficiency
   # Haiku is ~10x cheaper than Sonnet and sufficient for generating titles
-  @title_model "claude-haiku-4-5"
+  @title_model "claude-haiku-5-5"
 
   @doc """
   Builds a `%Sagents.Agent{}` from the supplied config.
@@ -162,21 +169,21 @@ defmodule AgentsDemo.Agents.Factory do
       }
     })
 
+    # To use Cloudflare, rename `_c` to `c` in the function head.
     # account_id = System.fetch_env!("CLOUDFLARE_ACCOUNT_ID")
     # api_key = System.fetch_env!("CLOUDFLARE_AI_API_TOKEN")
     # cloudflare_model = "@cf/zai-org/glm-5.3-flash"
 
-    # ChatOpenAI.new!(%{
+    # ChatOpenAICompatible.new!(%{
     #   endpoint:
     #     "https://api.cloudflare.com/client/v4/accounts/#{account_id}/ai/v1/chat/completions",
     #   api_key: api_key,
     #   model: cloudflare_model,
     #   stream: true,
+    #   stream_options: %{include_usage: true},
     #   temperature: 1,
-    #   # cache_control: %{"type" => "ephemeral"},
-    #   reasoning_mode: true,
     #   reasoning_effort: "medium",
-    #   req_config: cloudflare_req_config()
+    #   req_config: cloudflare_req_config(c)
     # })
   end
 
@@ -184,15 +191,22 @@ defmodule AgentsDemo.Agents.Factory do
   # #
   # # `req_config` is merged into the request just before it is sent, and Req
   # # merges header lists rather than replacing them, so these headers arrive
-  # # alongside the `Authorization` and `api-key` headers the chat model sets.
+  # # alongside the `Authorization` header the chat model sets.
+  # #
+  # # `x-session-affinity` sends a conversation's requests to the same replica,
+  # # so its repeated system prompt and history are served from the prompt
+  # # cache. Without it, repeated prefixes are not cached.
   # #
   # # `cf-aig-gateway-id` routes the call through a named AI Gateway. Without it
-  # # the request goes straight to Workers AI.
-  # defp cloudflare_req_config do
+  # # the request goes straight to Workers AI, and on the Workers Free plan some
+  # # models, GLM among them, are reachable only through a gateway.
+  # defp cloudflare_req_config(%FactoryConfig{conversation_id: conversation_id}) do
+  #   affinity = [{"x-session-affinity", "conversation-#{conversation_id}"}]
+  #
   #   case System.get_env("CLOUDFLARE_AI_GATEWAY_ID") do
-  #     nil -> %{}
-  #     "" -> %{}
-  #     gateway_id -> %{headers: [{"cf-aig-gateway-id", gateway_id}]}
+  #     nil -> %{headers: affinity}
+  #     "" -> %{headers: affinity}
+  #     gateway_id -> %{headers: [{"cf-aig-gateway-id", gateway_id} | affinity]}
   #   end
   # end
 
@@ -216,9 +230,10 @@ defmodule AgentsDemo.Agents.Factory do
       stream: false
     })
 
+    # To use Cloudflare, rename `_c` to `c` in the function head.
     # account_id = System.fetch_env!("CLOUDFLARE_ACCOUNT_ID")
 
-    # ChatOpenAI.new!(%{
+    # ChatOpenAICompatible.new!(%{
     #   endpoint:
     #     "https://api.cloudflare.com/client/v4/accounts/#{account_id}/ai/v1/chat/completions",
     #   model: "@cf/zai-org/glm-5.3-flash",
@@ -226,7 +241,7 @@ defmodule AgentsDemo.Agents.Factory do
     #   stream: false,
     #   temperature: 1,
     #   reasoning_effort: "none",
-    #   req_config: cloudflare_req_config()
+    #   req_config: cloudflare_req_config(c)
     # })
   end
 
@@ -327,6 +342,28 @@ defmodule AgentsDemo.Agents.Factory do
       {AgentsDemo.Middleware.UserContextMiddleware, [scope: c.scope]},
       {InjectCurrentTime, [timezone: c.timezone]},
       WebToolMiddleware,
+      # Modes the model can switch between with the `switch_mode` tool. Only
+      # the active mode's middleware contribute their prompt and tools. The
+      # model is told which tools a switch adds; the user sees an announcement.
+      {AbilitySetSwitcher,
+       [
+         sets: %{
+           "pirate" =>
+             AbilitySet.new!(%{
+               name: "Pirate",
+               when_to_use: "The user wants to talk like a pirate or set sail.",
+               middleware: [PirateMiddleware]
+             }),
+           "kung_foo" =>
+             AbilitySet.new!(%{
+               name: "Kung Foo",
+               when_to_use:
+                 "The user wants business or interpersonal workplace counsel from a Kung Fu master.",
+               middleware: [KungFooMiddleware]
+             })
+         },
+         on_switch: {ModeAnnouncer, :announce, []}
+       ]},
       Sagents.Middleware.Summarization,
       Sagents.Middleware.PatchToolCalls,
       Sagents.Middleware.AskUserQuestion

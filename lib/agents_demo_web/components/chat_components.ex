@@ -646,6 +646,7 @@ defmodule AgentsDemoWeb.ChatComponents do
         <details
           id={"#{@group.id}-work"}
           class="group/work"
+          phx-mounted={JS.ignore_attributes("open")}
         >
           <summary class="flex cursor-pointer select-none list-none items-center gap-2 pr-3 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] [&::-webkit-details-marker]:hidden">
             <.icon
