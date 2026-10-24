@@ -65,6 +65,7 @@ defmodule AgentsDemo.Agents.Factory do
   alias AgentsDemo.Agents.DemoSetup
   alias AgentsDemo.Middleware.InjectCurrentTime
   alias AgentsDemo.Middleware.KungFooMiddleware
+  alias AgentsDemo.Middleware.ManagedDevicesMiddleware
   alias AgentsDemo.Middleware.PirateMiddleware
   alias AgentsDemo.Middleware.WebToolMiddleware
   alias AgentsDemo.Agents.ModeAnnouncer
@@ -73,6 +74,7 @@ defmodule AgentsDemo.Agents.Factory do
   alias Sagents.Middleware.AbilitySetSwitcher
   alias Sagents.Middleware.ConversationTitle
   alias Sagents.Middleware.HumanInTheLoop
+  alias Sagents.Middleware.ToolSearch
   alias AgentsDemo.Agents.FactoryConfig
 
   require Logger
@@ -83,7 +85,7 @@ defmodule AgentsDemo.Agents.Factory do
 
   # Primary model for agent conversations
   # See: https://docs.anthropic.com/en/docs/models-overview
-  @main_model "claude-sonnet-4-6"
+  @main_model "claude-sonnet-5-5"
 
   # Title generation uses a lighter/faster model for cost efficiency
   # Haiku is ~10x cheaper than Sonnet and sufficient for generating titles
@@ -162,11 +164,14 @@ defmodule AgentsDemo.Agents.Factory do
       model: @main_model,
       api_key: System.fetch_env!("ANTHROPIC_API_KEY"),
       stream: true,
+      # Covers adaptive thinking plus the reply.
+      max_tokens: 8_000,
       cache_control: %{"type" => "ephemeral"},
-      thinking: %{
-        type: "enabled",
-        budget_tokens: 3_000
-      }
+      # Valid on claude-sonnet-4-6 and claude-sonnet-5-5. `xhigh` is not
+      # accepted by 4.6. `display: "summarized"` keeps thinking text visible
+      # in the UI; Sonnet 5 and later omit it by default.
+      thinking: %{type: "adaptive", display: "summarized"},
+      output_config: %{"effort" => "medium"}
     })
 
     # To use Cloudflare, rename `_c` to `c` in the function head.
@@ -342,6 +347,12 @@ defmodule AgentsDemo.Agents.Factory do
       {AgentsDemo.Middleware.UserContextMiddleware, [scope: c.scope]},
       {InjectCurrentTime, [timezone: c.timezone]},
       WebToolMiddleware,
+      # Provider tool search. The search tool goes out with every request, and
+      # each middleware that declares a namespace (`tool_search/1`) has its
+      # tools deferred until the model searches for them. The system prompt
+      # lists the namespaces. It must sit outside every ability set.
+      ToolSearch,
+      ManagedDevicesMiddleware,
       # Modes the model can switch between with the `switch_mode` tool. Only
       # the active mode's middleware contribute their prompt and tools. The
       # model is told which tools a switch adds; the user sees an announcement.

@@ -11,7 +11,7 @@ defmodule AgentsDemo.Application do
     # Lumis compiles a parser the first time a document needs it. Warming the
     # languages replies most often contain moves that compile off the first
     # chat message. It runs in the background and cannot fail the boot.
-    Lumis.Languages.async_load(~w(elixir json javascript python bash))
+    Lumis.Languages.async_load(warmed_languages())
 
     children = [
       AgentsDemoWeb.Telemetry,
@@ -45,6 +45,12 @@ defmodule AgentsDemo.Application do
     opts = [strategy: :one_for_one, name: AgentsDemo.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  @doc """
+  The languages warmed at boot. Each one needs its parser package in
+  `mix.exs`; warming a language no dependency supplies logs a warning.
+  """
+  def warmed_languages, do: ~w(elixir json javascript python bash)
 
   # Zero in dev and test. A drain delay that fires on every Ctrl-C is a delay
   # someone disables in week two, and then it is not there in production either.

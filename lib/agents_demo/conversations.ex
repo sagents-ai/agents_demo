@@ -334,7 +334,8 @@ defmodule AgentsDemo.Conversations do
 
   A trailing row of another kind (a todo snapshot, a notification) ends the
   scan and yields no rows, which leaves the user request's work uncollapsed
-  rather than collapsing the wrong rows.
+  rather than collapsing the wrong rows. An assistant's thinking and tool
+  search rows belong to the answer's message and do not end it.
   """
   def trailing_answer_row_ids(%Scope{} = scope, conversation_id, seq) do
     case authorize_conversation(scope, conversation_id) do
@@ -344,7 +345,7 @@ defmodule AgentsDemo.Conversations do
         |> order_by([m], desc: m.inserted_at, desc: m.sequence)
         |> Repo.all()
         |> Enum.take_while(
-          &(&1.message_type == "assistant" and &1.content_type in ~w(text thinking))
+          &(&1.message_type == "assistant" and &1.content_type in ~w(text thinking tool_search))
         )
         |> Enum.filter(&(&1.content_type == "text"))
         |> Enum.map(& &1.id)

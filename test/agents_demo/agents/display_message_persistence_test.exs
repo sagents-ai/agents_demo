@@ -151,6 +151,86 @@ defmodule AgentsDemo.Agents.DisplayMessagePersistenceTest do
     end
   end
 
+  describe "save_message/3 tool search rows" do
+    test "a search is saved in place between the text around it" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message =
+        Message.new_assistant!(%{
+          content: [
+            ContentPart.text!("Searching."),
+            ContentPart.provider_item!("anthropic", %{
+              "type" => "server_tool_use",
+              "id" => "srvtoolu_1",
+              "name" => "tool_search_tool_bm25",
+              "input" => %{"query" => "devices"}
+            }),
+            ContentPart.provider_item!("anthropic", %{
+              "type" => "tool_search_tool_result",
+              "tool_use_id" => "srvtoolu_1",
+              "content" => %{
+                "type" => "tool_search_tool_search_result",
+                "tool_references" => [
+                  %{"type" => "tool_reference", "tool_name" => "devices_list"}
+                ]
+              }
+            }),
+            ContentPart.text!("Found the device tools.")
+          ]
+        })
+
+      assert {:ok, [first, search, last]} =
+               DisplayMessagePersistence.save_message(scope, message, context)
+
+      assert {first.content_type, first.sequence} == {"text", 0}
+      assert {last.content_type, last.sequence} == {"text", 2}
+
+      assert %DisplayMessage{
+               content_type: "tool_search",
+               message_type: "assistant",
+               sequence: 1,
+               tool_call_id: nil,
+               content: %{
+                 "provider" => "anthropic",
+                 "query" => "devices",
+                 "tools" => ["devices_list"],
+                 "namespaces" => []
+               }
+             } = search
+    end
+
+    test "a tool result returning tool references saves the load after the result" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      context = %{agent_id: "conversation-#{conversation.id}", conversation_id: conversation.id}
+
+      message =
+        Message.new_tool_result!(%{
+          tool_results: [
+            ToolResult.new!(%{
+              tool_call_id: "call_load",
+              name: "load_tools",
+              content: [ContentPart.tool_reference!("devices_list")]
+            })
+          ]
+        })
+
+      assert {:ok, [result, load]} =
+               DisplayMessagePersistence.save_message(scope, message, context)
+
+      assert result.content_type == "tool_result"
+      assert result.tool_call_id == "call_load"
+
+      # The lifecycle queries look a call up by the column, so only the result
+      # row carries it there.
+      assert load.content_type == "tool_search"
+      assert load.tool_call_id == nil
+      assert load.content["tool_call_id"] == "call_load"
+    end
+  end
+
   describe "save_message/3 sequence assignment" do
     test "assigns an ascending sequence across the items of one message" do
       scope = user_scope_fixture()

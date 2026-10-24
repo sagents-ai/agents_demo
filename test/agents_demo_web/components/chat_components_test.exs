@@ -20,6 +20,28 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
   ```
   """
 
+  describe "installed parsers" do
+    test "every language warmed at boot has its parser installed" do
+      assert :ok = Lumis.Languages.load(AgentsDemo.Application.warmed_languages())
+    end
+
+    test "fence languages outside the bundles are installed" do
+      assert :ok = Lumis.Languages.load(~w(bash diff markdown))
+    end
+  end
+
+  describe "render_markdown_code/1" do
+    test "highlights a raw markdown document" do
+      html =
+        "# Title\n\nSome *emphasis* text."
+        |> ChatComponents.render_markdown_code()
+        |> Phoenix.HTML.safe_to_string()
+
+      assert html =~ "language-markdown"
+      assert html =~ "Title"
+    end
+  end
+
   describe "markdown/1" do
     defp render_md(assigns) do
       render_component(&ChatComponents.markdown/1, assigns)
@@ -407,6 +429,74 @@ defmodule AgentsDemoWeb.ChatComponentsTest do
 
       assert html =~ "2 of 4 resolved"
       assert html =~ "50%"
+    end
+  end
+
+  describe "tool search rendering" do
+    defp render_search(content) do
+      render_component(&ChatComponents.message/1, %{
+        message: %{
+          id: 9,
+          message_type: "assistant",
+          content_type: "tool_search",
+          content: content
+        }
+      })
+    end
+
+    defp search_node(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#tool-search-9[data-content-type='tool_search']")
+      |> Enum.to_list()
+    end
+
+    test "a search shows its query, namespaces and tools" do
+      html =
+        render_search(%{
+          "provider" => "openai",
+          "query" => "devices",
+          "namespaces" => ["devices"],
+          "tools" => ["devices_list", "devices_restart"]
+        })
+
+      assert [_node] = search_node(html)
+      assert html =~ "Searched tools"
+      assert html =~ "devices_list"
+      assert html =~ "devices_restart"
+      refute html =~ "nothing found"
+    end
+
+    test "a search that found nothing says so" do
+      html = render_search(%{"provider" => "anthropic", "tools" => [], "namespaces" => []})
+
+      assert [_node] = search_node(html)
+      assert html =~ "nothing found"
+    end
+
+    test "a failed search says so" do
+      html =
+        render_search(%{
+          "provider" => "anthropic",
+          "tools" => [],
+          "namespaces" => [],
+          "error" => true
+        })
+
+      assert html =~ "Tool search failed"
+      refute html =~ "nothing found"
+    end
+
+    test "a load made by a tool result reads as loaded tools" do
+      html =
+        render_search(%{
+          "tool_call_id" => "call_load",
+          "tools" => ["billing_invoices"],
+          "namespaces" => []
+        })
+
+      assert html =~ "Loaded tools"
+      assert html =~ "billing_invoices"
     end
   end
 

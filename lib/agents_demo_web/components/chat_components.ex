@@ -816,6 +816,12 @@ defmodule AgentsDemoWeb.ChatComponents do
     """
   end
 
+  defp message_body(%{message: %{content_type: "tool_search"}} = assigns) do
+    ~H"""
+    <.tool_search_display message={@message} />
+    """
+  end
+
   defp message_body(assigns) do
     ~H"""
     <.text_message message={@message} content_text={get_in(@message.content, ["text"]) || ""} />
@@ -968,6 +974,77 @@ defmodule AgentsDemoWeb.ChatComponents do
             </div>
           </div>
         <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  attr :message, :map, required: true
+
+  # Component: Tool Search (status line for a tool search)
+  #
+  # The model loading tools it was not shown up front, either through the
+  # provider's search or through a tool that returned tool references. Like
+  # narration, it is the model working rather than replying, so it sits flush
+  # with a rule down its left edge. Namespaces (OpenAI groups) come first as
+  # accent chips, then the individual tools.
+  #
+  # A search that found nothing and a failed search each say so, because a
+  # model that searched and came back empty-handed explains the answer that
+  # follows.
+  defp tool_search_display(assigns) do
+    content = assigns.message.content || %{}
+
+    assigns =
+      assigns
+      |> assign(:tools, Map.get(content, "tools", []))
+      |> assign(:namespaces, Map.get(content, "namespaces", []))
+      |> assign(:query, Map.get(content, "query"))
+      |> assign(:error?, Map.get(content, "error") == true)
+      |> assign(:by_tool?, Map.has_key?(content, "tool_call_id"))
+
+    ~H"""
+    <div
+      id={"tool-search-#{@message.id}"}
+      class="px-4 py-1 ml-4 flex items-start gap-2 border-l-2 border-[var(--color-border)]"
+      data-content-type="tool_search"
+    >
+      <.icon
+        name={if(@error?, do: "hero-exclamation-triangle", else: "hero-magnifying-glass")}
+        class={"w-3.5 h-3.5 mt-1 shrink-0 #{if(@error?, do: "text-[var(--color-error)]", else: "text-[var(--color-text-secondary)]")}"}
+      />
+      <div class="min-w-0 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--color-text-secondary)]">
+        <span class="italic">
+          <%= cond do %>
+            <% @error? -> %>
+              Tool search failed
+            <% @by_tool? -> %>
+              Loaded tools
+            <% true -> %>
+              Searched tools
+          <% end %>
+        </span>
+        <span :if={@query} class="text-[var(--color-text-tertiary)]">
+          for “{@query}”
+        </span>
+        <span
+          :if={!@error? and @tools == [] and @namespaces == []}
+          class="text-[var(--color-text-tertiary)]"
+        >
+          · nothing found
+        </span>
+        <span
+          :for={namespace <- @namespaces}
+          class="px-1.5 py-0.5 rounded-md text-xs font-medium bg-[var(--color-accent)]/10 text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/20"
+        >
+          {namespace}
+        </span>
+        <span
+          :for={tool <- @tools}
+          class="px-1.5 py-0.5 rounded-md font-mono text-xs bg-[var(--color-background)] border border-[var(--color-border)] text-[var(--color-text-primary)]"
+        >
+          {tool}
+        </span>
       </div>
     </div>
     """

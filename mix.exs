@@ -41,12 +41,12 @@ defmodule AgentsDemo.MixProject do
   defp deps do
     [
       {:bcrypt_elixir, "~> 3.0"},
-      {:langchain, "~> 0.15.4"},
+      {:langchain, "~> 0.15.5"},
       # {:langchain, path: "../my_langchain", override: true},
-      {:sagents, "~> 0.18.0"},
+      {:sagents, "~> 0.19.0"},
       # {:sagents, path: "../sagents", override: true},
       # {:sagents_live_debugger, path: "../sagents_live_debugger"},
-      {:sagents_live_debugger, "~> 0.6.0"},
+      {:sagents_live_debugger, "~> 0.6.6"},
       {:zoneinfo, "~> 0.1.0"},
       {:phoenix, "~> 1.8.1"},
       {:phoenix_ecto, "~> 4.5"},
@@ -77,13 +77,19 @@ defmodule AgentsDemo.MixProject do
       {:horde, "~> 0.10.0"},
       {:bandit, "~> 1.5"},
       {:mdex, "~> 0.14"},
-      {:lumis, "~> 0.9"},
+      {:lumis, "~> 0.10.4"},
       # Lumis highlights only the languages whose parsers are installed, and a
       # fence in any other language renders as plain text. Model replies can
       # contain code in almost anything, so these bundles cover the common web
       # and backend languages rather than a hand-picked list.
-      {:lumis_wasm_bundle_web, "~> 0.1"},
-      {:lumis_wasm_bundle_backend, "~> 0.1"},
+      {:lumis_wasm_bundle_web, "~> 0.1.2"},
+      {:lumis_wasm_bundle_backend, "~> 0.1.2"},
+      # Languages neither bundle carries. `bash` and `diff` are frequent fences
+      # in model replies, and `markdown` is required: the file viewer highlights
+      # a raw markdown file as a document, which raises without its parser.
+      {:lumis_wasm_bash, "~> 0.26.5"},
+      {:lumis_wasm_diff, "~> 0.26.4"},
+      {:lumis_wasm_markdown, "~> 0.26.3"},
       {:tidewave, "~> 0.5", only: :dev},
       {:dotenvy, "~> 1.1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
