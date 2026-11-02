@@ -339,6 +339,7 @@ defmodule AgentsDemo.Agents.Factory do
            AgentsDemo.Middleware.WebToolMiddleware,
            AgentsDemo.Middleware.InjectCurrentTime,
            AgentsDemo.Middleware.UserContextMiddleware,
+           Sagents.Middleware.TodoList,
            Sagents.Middleware.Summarization,
            Sagents.Middleware.ConversationTitle,
            Sagents.Middleware.AskUserQuestion
@@ -355,7 +356,9 @@ defmodule AgentsDemo.Agents.Factory do
       ManagedDevicesMiddleware,
       # Modes the model can switch between with the `switch_mode` tool. Only
       # the active mode's middleware contribute their prompt and tools. The
-      # model is told which tools a switch adds; the user sees an announcement.
+      # user sees an announcement of each switch. The `task` tool can also
+      # start a general-purpose sub-agent in any of these modes (`mode`), so
+      # the model can hand off a mode's work without switching itself.
       {AbilitySetSwitcher,
        [
          sets: %{

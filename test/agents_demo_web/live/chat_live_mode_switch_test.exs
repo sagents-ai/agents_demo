@@ -92,7 +92,9 @@ defmodule AgentsDemoWeb.ChatLiveModeSwitchTest do
     assert {:ok, assigns} = wait_for_status(view, :idle)
 
     assert_received {:tool_results,
-                     ["Switched to the Pirate mode. Tools now available: set_sail."]}
+                     [
+                       "Switched to the Pirate mode. Your tools now match this mode; use the tool definitions you have."
+                     ]}
 
     rows = Conversations.load_display_messages(assigns.current_scope, assigns.conversation_id)
     texts = Enum.map(rows, &Map.get(&1.content, "text"))
