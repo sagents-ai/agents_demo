@@ -83,20 +83,17 @@ defmodule AgentsDemo.ConversationsTest do
       assert Enum.any?(conversations, &(&1.id == conv2.id))
     end
 
-    test "orders conversations by updated_at DESC" do
+    test "orders conversations by last_message_at, newest first" do
       scope = user_scope_fixture()
 
       conv1 = conversation_fixture(%{scope: scope, title: "First"})
-      :timer.sleep(10)
       conv2 = conversation_fixture(%{scope: scope, title: "Second"})
-      :timer.sleep(10)
       conv3 = conversation_fixture(%{scope: scope, title: "Third"})
+      set_last_message_at(conv1, -3)
+      set_last_message_at(conv2, -2)
+      set_last_message_at(conv3, -1)
 
-      conversations = Conversations.list_conversations(scope)
-
-      assert Enum.at(conversations, 0).id == conv3.id
-      assert Enum.at(conversations, 1).id == conv2.id
-      assert Enum.at(conversations, 2).id == conv1.id
+      assert ids(Conversations.list_conversations(scope)) == [conv3.id, conv2.id, conv1.id]
     end
 
     test "respects limit option" do
@@ -124,6 +121,128 @@ defmodule AgentsDemo.ConversationsTest do
       assert Enum.at(offset_conversations, 0).id == Enum.at(all_conversations, 5).id
     end
   end
+
+  describe "recent order" do
+    test "a new conversation starts with last_message_at set" do
+      scope = user_scope_fixture()
+
+      {:ok, conversation} = Conversations.create_conversation(scope, %{})
+
+      assert %DateTime{} = conversation.last_message_at
+      assert DateTime.compare(conversation.last_message_at, conversation.inserted_at) != :gt
+      assert reload(conversation).last_message_at == conversation.last_message_at
+    end
+
+    test "a new message sets last_message_at to its own inserted_at" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      set_last_message_at(conversation, -60)
+
+      message = text_message_fixture(scope, conversation.id)
+
+      assert reload(conversation).last_message_at == message.inserted_at
+    end
+
+    test "continuing the oldest conversation puts it first" do
+      scope = user_scope_fixture()
+      oldest = conversation_fixture(%{scope: scope, title: "Oldest"})
+      middle = conversation_fixture(%{scope: scope, title: "Middle"})
+      newest = conversation_fixture(%{scope: scope, title: "Newest"})
+      set_last_message_at(oldest, -3)
+      set_last_message_at(middle, -2)
+      set_last_message_at(newest, -1)
+
+      _message = text_message_fixture(scope, oldest.id)
+
+      assert ids(Conversations.list_conversations(scope)) == [oldest.id, newest.id, middle.id]
+    end
+
+    test "renaming a conversation does not move it or its last_message_at" do
+      scope = user_scope_fixture()
+      first = conversation_fixture(%{scope: scope})
+      second = conversation_fixture(%{scope: scope})
+      set_last_message_at(first, -2)
+      set_last_message_at(second, -1)
+      before = reload(first).last_message_at
+
+      {:ok, _renamed} = Conversations.update_conversation(reload(first), %{title: "Renamed"})
+
+      assert reload(first).last_message_at == before
+      assert ids(Conversations.list_conversations(scope)) == [second.id, first.id]
+    end
+
+    test "update_conversation/2 cannot set last_message_at" do
+      conversation = conversation_fixture()
+      before = conversation.last_message_at
+
+      {:ok, _updated} =
+        Conversations.update_conversation(conversation, %{
+          last_message_at: DateTime.add(before, 3600, :second)
+        })
+
+      assert reload(conversation).last_message_at == before
+    end
+
+    test "an invalid message is refused and leaves last_message_at alone" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      set_last_message_at(conversation, -60)
+      before = reload(conversation).last_message_at
+
+      assert {:error, %Ecto.Changeset{}} =
+               Conversations.append_display_message(scope, conversation.id, %{
+                 message_type: "user",
+                 content_type: "text",
+                 content: %{}
+               })
+
+      assert reload(conversation).last_message_at == before
+    end
+
+    test "another owner's scope stores nothing and moves nothing" do
+      owner = user_scope_fixture()
+      other = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: owner})
+      before = conversation.last_message_at
+
+      assert {:error, :not_found} =
+               Conversations.append_display_message(other, conversation.id, %{
+                 message_type: "user",
+                 content_type: "text",
+                 content: %{"text" => "not yours"}
+               })
+
+      assert Conversations.load_display_messages(owner, conversation.id) == []
+      assert reload(conversation).last_message_at == before
+    end
+
+    test "last_message_at never moves backwards" do
+      scope = user_scope_fixture()
+      conversation = conversation_fixture(%{scope: scope})
+      # A later message whose transaction committed first.
+      set_last_message_at(conversation, 3600)
+      ahead = reload(conversation).last_message_at
+
+      _message = text_message_fixture(scope, conversation.id)
+
+      assert reload(conversation).last_message_at == ahead
+    end
+  end
+
+  defp set_last_message_at(%Conversation{id: id}, offset_seconds) do
+    at = DateTime.add(DateTime.utc_now(), offset_seconds, :second)
+
+    {1, _returned} =
+      Conversation
+      |> where([c], c.id == ^id)
+      |> Repo.update_all(set: [last_message_at: at])
+
+    :ok
+  end
+
+  defp reload(%Conversation{id: id}), do: Repo.get!(Conversation, id)
+
+  defp ids(conversations), do: Enum.map(conversations, & &1.id)
 
   describe "update_conversation/2" do
     test "updates conversation with valid attributes" do

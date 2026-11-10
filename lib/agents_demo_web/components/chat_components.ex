@@ -210,7 +210,7 @@ defmodule AgentsDemoWeb.ChatComponents do
                 {conversation.title}
               </h4>
               <p class="text-xs text-[var(--color-text-secondary)] m-0">
-                {format_relative_time(conversation.updated_at)}
+                {format_relative_time(conversation.last_message_at)}
               </p>
             </div>
             <button

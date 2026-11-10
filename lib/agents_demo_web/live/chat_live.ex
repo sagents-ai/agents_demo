@@ -512,6 +512,7 @@ defmodule AgentsDemoWeb.ChatLive do
     {:noreply,
      socket
      |> AgentLiveHelpers.handle_display_message_saved(display_msg)
+     |> move_conversation_to_top(display_msg)
      |> push_event("scroll-to-bottom", %{})}
   end
 
@@ -732,6 +733,30 @@ defmodule AgentsDemoWeb.ChatLive do
     socket
     |> reset_conversation_in_stream(previous_id)
     |> reset_conversation_in_stream(new_id)
+  end
+
+  # Saving a message sets the conversation's `last_message_at` to the
+  # message's `inserted_at` in the database, which puts it first in
+  # `list_conversations/2`. Mirror that in the open history list without a
+  # reload. A stream insert of an existing item updates it in place, so the
+  # item is deleted first to move it.
+  defp move_conversation_to_top(socket, %{inserted_at: inserted_at}) do
+    case socket.assigns[:conversation] do
+      %{id: _id} = conversation ->
+        conversation = %{conversation | last_message_at: inserted_at}
+        socket = assign(socket, :conversation, conversation)
+
+        if socket.assigns.is_thread_history_open do
+          socket
+          |> stream_delete(:conversation_list, conversation)
+          |> stream_insert(:conversation_list, conversation, at: 0)
+        else
+          socket
+        end
+
+      nil ->
+        socket
+    end
   end
 
   # Re-insert a conversation into the stream to trigger re-render with updated active state
