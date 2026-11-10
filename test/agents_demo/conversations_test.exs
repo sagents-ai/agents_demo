@@ -96,6 +96,30 @@ defmodule AgentsDemo.ConversationsTest do
       assert ids(Conversations.list_conversations(scope)) == [conv3.id, conv2.id, conv1.id]
     end
 
+    test "conversations with the same last_message_at list newest created first" do
+      scope = user_scope_fixture()
+      at = DateTime.add(DateTime.utc_now(), -60, :second)
+
+      [older, newer, newest] =
+        for offset <- [-30, -20, -10] do
+          conversation = conversation_fixture(%{scope: scope})
+
+          {1, _returned} =
+            Conversation
+            |> where([c], c.id == ^conversation.id)
+            |> Repo.update_all(
+              set: [
+                last_message_at: at,
+                inserted_at: DateTime.add(DateTime.utc_now(), offset, :second)
+              ]
+            )
+
+          conversation
+        end
+
+      assert ids(Conversations.list_conversations(scope)) == [newest.id, newer.id, older.id]
+    end
+
     test "respects limit option" do
       scope = user_scope_fixture()
 
